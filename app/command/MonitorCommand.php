@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace app\command;
 
 use app\service\MonitorNotificationService;
+use app\service\TelegramNotificationService;
 use think\console\Command;
 use think\console\Input;
 use think\console\Output;
@@ -14,28 +15,20 @@ use think\facade\Log;
  * 适用于 ThinkPHP8 + PHP8.2
  * 
  * 使用方法：
- * php think monitor:run                    // 执行一次监控
- * php think monitor:status                 // 检查系统状态
- * php think monitor:check recharge         // 手动检查指定类型
+ * php think monitor:start                  // 启动监控系统
  */
 class MonitorCommand extends Command
 {
-    protected static $defaultName = 'monitor';
-    protected static $defaultDescription = '数据监控通知系统';
+    protected static $defaultName = 'monitor:start';
+    protected static $defaultDescription = '启动数据监控通知系统';
 
     /**
      * 配置命令
      */
     protected function configure()
     {
-        $this->setName('monitor')
-             ->setDescription('数据监控通知系统')
-             ->addArgument('action', \think\console\input\Argument::OPTIONAL, '操作类型：run/status/check', 'run')
-             ->addArgument('type', \think\console\input\Argument::OPTIONAL, '检查类型：recharge/withdraw/redpacket/advertisement', '')
-             ->addOption('limit', 'l', \think\console\input\Option::VALUE_OPTIONAL, '限制处理数量', 50)
-             ->addOption('force', 'f', \think\console\input\Option::VALUE_NONE, '强制执行（忽略配置开关）')
-             ->addOption('verbose', 'v', \think\console\input\Option::VALUE_NONE, '详细输出')
-             ->addOption('dry-run', 'd', \think\console\input\Option::VALUE_NONE, '模拟运行（不实际发送消息）');
+        $this->setName('monitor:start')
+             ->setDescription('启动数据监控通知系统，默认每30秒检查一次所有监控表');
     }
 
     /**
@@ -43,40 +36,30 @@ class MonitorCommand extends Command
      */
     protected function execute(Input $input, Output $output)
     {
-        $action = $input->getArgument('action');
-        $verbose = $input->hasOption('verbose');
-        
         try {
             // 设置内存和时间限制
-            ini_set('memory_limit', '256M');
-            set_time_limit(300);
+            ini_set('memory_limit', '512M');
+            set_time_limit(0); // 无限制，因为是持续运行
             
-            $startTime = microtime(true);
+            $output->writeln("<info>🚀 正在启动数据监控通知系统...</info>");
+            $output->writeln("<comment>启动时间: " . date('Y-m-d H:i:s') . "</comment>");
             
-            if ($verbose) {
-                $output->writeln("<info>开始执行监控任务...</info>");
-                $output->writeln("<comment>执行时间: " . date('Y-m-d H:i:s') . "</comment>");
+            // 执行系统自检
+            if (!$this->performSystemCheck($output)) {
+                return self::FAILURE;
             }
             
-            $result = match($action) {
-                'run' => $this->executeMonitor($input, $output),
-                'status' => $this->executeStatus($input, $output),
-                'check' => $this->executeCheck($input, $output),
-                default => $this->showHelp($output)
-            };
+            // 发送启动通知
+            $this->sendStartupNotification($output);
             
-            $executionTime = round(microtime(true) - $startTime, 2);
+            // 开始监控循环
+            $this->startMonitoringLoop($output);
             
-            if ($verbose) {
-                $output->writeln("<comment>任务完成，耗时: {$executionTime}秒</comment>");
-            }
-            
-            return $result;
+            return self::SUCCESS;
             
         } catch (\Exception $e) {
-            $output->writeln("<error>命令执行失败: " . $e->getMessage() . "</error>");
+            $output->writeln("<error>❌ 命令执行失败: " . $e->getMessage() . "</error>");
             Log::error("监控命令执行失败: " . $e->getMessage(), [
-                'action' => $action,
                 'trace' => $e->getTraceAsString()
             ]);
             return self::FAILURE;
@@ -84,198 +67,195 @@ class MonitorCommand extends Command
     }
 
     /**
-     * 执行监控任务
+     * 执行系统自检
      */
-    private function executeMonitor(Input $input, Output $output): int
+    private function performSystemCheck(Output $output): bool
     {
-        $force = $input->hasOption('force');
-        $dryRun = $input->hasOption('dry-run');
-        $verbose = $input->hasOption('verbose');
+        $output->writeln("<info>🔍 正在进行系统自检...</info>");
         
-        try {
-            if ($dryRun) {
-                $output->writeln("<comment>模拟运行模式，不会实际发送消息</comment>");
-            }
-            
-            $monitorService = new MonitorNotificationService();
-            
-            // 检查系统状态
-            if (!$force) {
-                $status = $monitorService->checkSystemStatus();
-                if (!$status['monitor_enabled']) {
-                    $output->writeln("<error>监控系统已禁用，使用 --force 强制执行</error>");
-                    return self::FAILURE;
-                }
-                
-                if (!$status['telegram_bot_status']) {
-                    $output->writeln("<error>Telegram Bot 状态异常</error>");
-                    return self::FAILURE;
-                }
-            }
-            
-            // 执行监控
-            $results = $monitorService->runMonitor();
-            
-            // 输出结果
-            $this->outputMonitorResults($results, $output, $verbose);
-            
-            // 记录成功日志
-            Log::info("监控任务执行成功", [
-                'processed' => $results['summary']['total_processed'],
-                'sent' => $results['summary']['total_sent'],
-                'failed' => $results['summary']['total_failed'],
-                'execution_time' => $results['execution_time'] ?? 0
-            ]);
-            
-            return self::SUCCESS;
-            
-        } catch (\Exception $e) {
-            $output->writeln("<error>监控任务执行失败: " . $e->getMessage() . "</error>");
-            Log::error("监控任务执行失败: " . $e->getMessage());
-            return self::FAILURE;
-        }
-    }
-
-    /**
-     * 检查系统状态
-     */
-    private function executeStatus(Input $input, Output $output): int
-    {
         try {
             $monitorService = new MonitorNotificationService();
             $status = $monitorService->checkSystemStatus();
             
-            $output->writeln("<info>系统状态检查结果:</info>");
-            $output->writeln("监控启用状态: " . ($status['monitor_enabled'] ? '<info>启用</info>' : '<error>禁用</error>'));
-            $output->writeln("Telegram Bot: " . ($status['telegram_bot_status'] ? '<info>正常</info>' : '<error>异常</error>'));
-            $output->writeln("数据库状态: " . ($status['database_status'] ? '<info>正常</info>' : '<error>异常</error>'));
-            $output->writeln("缓存状态: " . ($status['cache_status'] ? '<info>正常</info>' : '<error>异常</error>'));
-            $output->writeln("最后检查时间: " . ($status['last_check_time'] ?: '<comment>未执行过</comment>'));
+            // 检查监控系统开关
+            if (!$status['monitor_enabled']) {
+                $output->writeln("<error>❌ 监控系统已禁用，请检查配置</error>");
+                return false;
+            }
             
-            // 检查配置
+            // 检查Telegram Bot状态
+            if (!$status['telegram_bot_status']) {
+                $output->writeln("<error>❌ Telegram Bot 状态异常，请检查配置</error>");
+                return false;
+            }
+            
+            // 检查数据库状态
+            if (!$status['database_status']) {
+                $output->writeln("<error>❌ 数据库连接异常</error>");
+                return false;
+            }
+            
+            // 检查缓存状态
+            if (!$status['cache_status']) {
+                $output->writeln("<error>❌ 缓存系统异常</error>");
+                return false;
+            }
+            
+            // 显示详细信息
+            $output->writeln("  ✅ 监控开关: 已启用");
+            $output->writeln("  ✅ Telegram Bot: 正常");
+            $output->writeln("  ✅ 数据库连接: 正常");
+            $output->writeln("  ✅ 缓存系统: 正常");
+            
+            // 显示配置信息
             $config = config('monitor_config');
-            $output->writeln("\n<info>配置信息:</info>");
-            $output->writeln("检查间隔: {$config['check_interval']}秒");
-            $output->writeln("充值监控: " . ($config['notify_rules']['recharge']['enabled'] ? '启用' : '禁用'));
-            $output->writeln("提现监控: " . ($config['notify_rules']['withdraw']['enabled'] ? '启用' : '禁用'));
-            $output->writeln("红包监控: " . ($config['notify_rules']['redpacket']['enabled'] ? '启用' : '禁用'));
-            $output->writeln("广告监控: " . ($config['notify_rules']['advertisement']['enabled'] ? '启用' : '禁用'));
+            $output->writeln("  📋 监控配置:");
+            $output->writeln("     - 充值监控: " . ($config['notify_rules']['recharge']['enabled'] ? '启用' : '禁用'));
+            $output->writeln("     - 提现监控: " . ($config['notify_rules']['withdraw']['enabled'] ? '启用' : '禁用'));
+            $output->writeln("     - 红包监控: " . ($config['notify_rules']['redpacket']['enabled'] ? '启用' : '禁用'));
+            $output->writeln("     - 广告监控: " . ($config['notify_rules']['advertisement']['enabled'] ? '启用' : '禁用'));
             
-            return self::SUCCESS;
+            $output->writeln("<info>✅ 系统自检完成，所有组件正常</info>");
+            return true;
             
         } catch (\Exception $e) {
-            $output->writeln("<error>状态检查失败: " . $e->getMessage() . "</error>");
-            return self::FAILURE;
+            $output->writeln("<error>❌ 系统自检失败: " . $e->getMessage() . "</error>");
+            return false;
         }
     }
 
     /**
-     * 手动检查指定类型
+     * 发送启动通知
      */
-    private function executeCheck(Input $input, Output $output): int
+    private function sendStartupNotification(Output $output): void
     {
-        $type = $input->getArgument('type');
-        $limit = (int)$input->getOption('limit');
-        $verbose = $input->hasOption('verbose');
-        
-        if (empty($type)) {
-            $output->writeln("<error>请指定检查类型: recharge, withdraw, redpacket, advertisement</error>");
-            return self::FAILURE;
-        }
-        
-        if (!in_array($type, ['recharge', 'withdraw', 'redpacket', 'advertisement'])) {
-            $output->writeln("<error>不支持的检查类型: {$type}</error>");
-            return self::FAILURE;
-        }
+        $output->writeln("<info>📢 发送系统启动通知...</info>");
         
         try {
-            $monitorService = new MonitorNotificationService();
-            $results = $monitorService->manualCheck($type, $limit);
+            // 直接使用 TelegramNotificationService
+            $telegramService = new TelegramNotificationService();
             
-            $output->writeln("<info>手动检查 {$type} 结果:</info>");
-            $output->writeln("发现记录: {$results['count']}条");
-            $output->writeln("发送成功: {$results['sent']}条");
-            $output->writeln("发送失败: {$results['failed']}条");
+            // 创建启动通知数据
+            $notificationData = [
+                'title' => '🚀 监控系统已启动',
+                'message' => '数据监控通知系统已成功启动，正在监控以下业务：\n\n' .
+                           '• 💰 充值业务监控\n' .
+                           '• 💸 提现业务监控\n' .
+                           '• 🧧 红包业务监控\n' .
+                           '• 📢 广告业务监控\n\n' .
+                           '系统将每30秒检查一次，如有新业务将及时通知。',
+                'time' => date('Y-m-d H:i:s')
+            ];
             
-            if (!empty($results['errors']) && $verbose) {
-                $output->writeln("\n<comment>错误详情:</comment>");
-                foreach ($results['errors'] as $error) {
-                    $output->writeln("<error>  - {$error}</error>");
+            // 使用现有的 sendToAllGroups 方法
+            $sendResults = $telegramService->sendToAllGroups(
+                'system_startup_notify',
+                $notificationData,
+                'system',
+                0
+            );
+            
+            $successCount = 0;
+            $failedCount = 0;
+            
+            foreach ($sendResults as $result) {
+                if ($result['success']) {
+                    $successCount++;
+                } else {
+                    $failedCount++;
                 }
             }
             
-            return self::SUCCESS;
+            if ($successCount > 0) {
+                $output->writeln("<info>✅ 启动通知发送成功</info>");
+                $output->writeln("  📊 发送统计: 成功{$successCount}个群组, 失败{$failedCount}个群组");
+            } else {
+                $output->writeln("<comment>⚠️ 启动通知发送失败，但监控将继续运行</comment>");
+            }
             
         } catch (\Exception $e) {
-            $output->writeln("<error>手动检查失败: " . $e->getMessage() . "</error>");
-            return self::FAILURE;
+            $output->writeln("<comment>⚠️ 启动通知发送异常: " . $e->getMessage() . "，但监控将继续运行</comment>");
         }
     }
 
     /**
-     * 显示帮助信息
+     * 开始监控循环
      */
-    private function showHelp(Output $output): int
+    private function startMonitoringLoop(Output $output): void
     {
-        $output->writeln("<info>数据监控通知系统</info>");
-        $output->writeln("");
-        $output->writeln("<comment>使用方法:</comment>");
-        $output->writeln("  php think monitor:run                    执行一次完整监控");
-        $output->writeln("  php think monitor:status                 检查系统状态");
-        $output->writeln("  php think monitor:check recharge         手动检查充值");
-        $output->writeln("  php think monitor:check withdraw         手动检查提现");
-        $output->writeln("  php think monitor:check redpacket        手动检查红包");
-        $output->writeln("  php think monitor:check advertisement    手动检查广告");
-        $output->writeln("");
-        $output->writeln("<comment>选项:</comment>");
-        $output->writeln("  -f, --force                              强制执行（忽略配置开关）");
-        $output->writeln("  -v, --verbose                            详细输出");
-        $output->writeln("  -d, --dry-run                            模拟运行（不实际发送）");
-        $output->writeln("  -l, --limit <数量>                       限制处理数量（默认50）");
-        $output->writeln("");
-        $output->writeln("<comment>示例:</comment>");
-        $output->writeln("  php think monitor:run --verbose          详细模式执行监控");
-        $output->writeln("  php think monitor:run --force            强制执行监控");
-        $output->writeln("  php think monitor:check recharge -l 10   检查最近10条充值");
+        $interval = 30; // 固定30秒检查间隔
         
-        return self::SUCCESS;
-    }
-
-    /**
-     * 输出监控结果
-     */
-    private function outputMonitorResults(array $results, Output $output, bool $verbose = false): void
-    {
-        $summary = $results['summary'];
+        $output->writeln("<info>🔄 监控系统已启动，检查间隔: {$interval}秒 (每{$interval}秒进行一轮全体表检测)</info>");
+        $output->writeln("<comment>按 Ctrl+C 停止监控</comment>");
+        $output->writeln("");
         
-        $output->writeln("<info>监控任务执行完成</info>");
-        $output->writeln("总处理记录: {$summary['total_processed']}条");
-        $output->writeln("发送成功: {$summary['total_sent']}条");
-        $output->writeln("发送失败: {$summary['total_failed']}条");
+        $monitorService = new MonitorNotificationService();
+        $checkCount = 0;
         
-        if (isset($results['execution_time'])) {
-            $output->writeln("执行耗时: {$results['execution_time']}秒");
+        // 注册信号处理器（优雅停止）
+        if (function_exists('pcntl_signal')) {
+            pcntl_signal(SIGTERM, [$this, 'handleSignal']);
+            pcntl_signal(SIGINT, [$this, 'handleSignal']);
         }
         
-        if ($verbose && isset($results['processed'])) {
-            $output->writeln("\n<comment>详细结果:</comment>");
-            
-            foreach ($results['processed'] as $type => $data) {
-                if ($data['count'] > 0) {
-                    $output->writeln("  {$type}: 发现{$data['count']}条, 成功{$data['sent']}条, 失败{$data['failed']}条");
-                    
-                    if (!empty($data['errors'])) {
-                        foreach ($data['errors'] as $error) {
-                            $output->writeln("    <error>- {$error}</error>");
-                        }
-                    }
+        while (true) {
+            try {
+                $checkCount++;
+                $startTime = microtime(true);
+                
+                $output->writeln("<comment>[" . date('H:i:s') . "] 执行第 {$checkCount} 次检查...</comment>");
+                
+                // 执行监控检查
+                $results = $monitorService->runMonitor();
+                
+                $executionTime = round(microtime(true) - $startTime, 2);
+                
+                // 输出详细结果
+                if ($results['summary']['total_processed'] > 0) {
+                    $output->writeln("<info>[" . date('H:i:s') . "] 🔔 发现 {$results['summary']['total_processed']} 条新记录，发送成功 {$results['summary']['total_sent']} 条</info>");
+                } else {
+                    $output->writeln("<comment>[" . date('H:i:s') . "] ✅ 检查完成，无新记录 (耗时: {$executionTime}s)</comment>");
                 }
+                
+                // 如果有失败的消息，显示警告
+                if ($results['summary']['total_failed'] > 0) {
+                    $output->writeln("<error>[" . date('H:i:s') . "] ⚠️  有 {$results['summary']['total_failed']} 条消息发送失败</error>");
+                }
+                
+                // 记录统计信息
+                Log::info("监控检查完成", [
+                    'check_count' => $checkCount,
+                    'processed' => $results['summary']['total_processed'],
+                    'sent' => $results['summary']['total_sent'],
+                    'failed' => $results['summary']['total_failed'],
+                    'execution_time' => $executionTime
+                ]);
+                
+                // 等待下次检查
+                sleep($interval);
+                
+                // 处理信号
+                if (function_exists('pcntl_signal_dispatch')) {
+                    pcntl_signal_dispatch();
+                }
+                
+            } catch (\Exception $e) {
+                $output->writeln("<error>[" . date('H:i:s') . "] ❌ 监控检查异常: " . $e->getMessage() . "</error>");
+                Log::error("监控检查异常: " . $e->getMessage());
+                
+                // 出错后等待较短时间再继续
+                sleep(min($interval, 30));
             }
         }
-        
-        // 如果有错误，显示警告
-        if ($summary['total_failed'] > 0) {
-            $output->writeln("\n<comment>注意: 有 {$summary['total_failed']} 条消息发送失败，请检查日志</comment>");
-        }
+    }
+
+    /**
+     * 处理停止信号
+     */
+    public function handleSignal(int $signo): void
+    {
+        echo "\n🛑 收到停止信号，正在优雅关闭监控系统...\n";
+        Log::info("监控系统收到停止信号，正在关闭");
+        exit(0);
     }
 }

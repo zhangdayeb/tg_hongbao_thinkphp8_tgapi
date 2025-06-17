@@ -239,7 +239,7 @@ class MonitorNotificationService
     }
     
     /**
-     * 检查广告表
+     * 检查广告表 - 支持多种发送模式
      */
     private function checkAdvertisementTable(string $currentTime): array
     {
@@ -251,29 +251,66 @@ class MonitorNotificationService
                 return $result;
             }
             
-            // 查找需要发送的广告（定时发送 + 立即发送）
-            $pendingAds = Advertisement::where('status', 0)
-                                    ->where(function($query) use ($currentTime) {
-                                        // 定时发送且时间已到
-                                        $query->where('send_type', 2)
-                                              ->where('send_time', '<=', $currentTime);
-                                    })
-                                    ->whereOr(function($query) {
-                                        // 立即发送
-                                        $query->where('send_type', 1);
-                                    })
-                                    ->order('created_at', 'asc')
-                                    ->select();
+            $currentDateTime = new \DateTime($currentTime);
+            $currentDate = $currentDateTime->format('Y-m-d');
+            $currentTimeOnly = $currentDateTime->format('H:i');
+            
+            // 查找需要发送的广告
+            $pendingAds = Advertisement::where('status', 1) // 只查找启用状态
+                ->where(function($query) use ($currentDate) {
+                    // 检查有效期
+                    $query->where(function($subQuery) use ($currentDate) {
+                        $subQuery->whereNull('start_date')
+                                ->orWhere('start_date', '<=', $currentDate);
+                    })->where(function($subQuery) use ($currentDate) {
+                        $subQuery->whereNull('end_date')
+                                ->orWhere('end_date', '>=', $currentDate);
+                    });
+                })
+                ->where(function($query) use ($currentTime, $currentTimeOnly) {
+                    $query->where(function($subQuery) use ($currentTime) {
+                        // 模式1：一次性定时发送
+                        $subQuery->where('send_mode', 1)
+                                ->where('is_sent', 0) // 未发送过
+                                ->where('send_time', '<=', $currentTime);
+                    })->orWhere(function($subQuery) use ($currentTimeOnly) {
+                        // 模式2：每日定时发送
+                        $subQuery->where('send_mode', 2)
+                                ->where(function($innerQuery) use ($currentTimeOnly, $currentTime) {
+                                    $innerQuery->where(function($timeQuery) use ($currentTimeOnly) {
+                                        // 正常时间匹配
+                                        $timeQuery->whereRaw("FIND_IN_SET(?, daily_times)", [$currentTimeOnly]);
+                                    })->orWhere(function($startupQuery) use ($currentTime) {
+                                        // 🚀 启动时发送：如果从未发送过，立即发送一轮
+                                        $startupQuery->whereNull('last_sent_time')
+                                                    ->orWhereRaw("DATE(last_sent_time) < DATE(?)", [$currentTime]);
+                                    });
+                                });
+                    })->orWhere(function($subQuery) use ($currentTime) {
+                        // 模式3：循环间隔发送
+                        $subQuery->where('send_mode', 3)
+                                ->where(function($innerQuery) use ($currentTime) {
+                                    $innerQuery->whereNull('last_sent_time') // 🚀 启动时立即发送
+                                            ->orWhereRaw("TIMESTAMPDIFF(MINUTE, last_sent_time, ?) >= interval_minutes", 
+                                                        [$currentTime]);
+                                });
+                    });
+                })
+                ->order('created_at', 'asc')
+                ->select();
             
             $result['count'] = count($pendingAds);
             Log::info("发现 {$result['count']} 条待发送广告");
             
             foreach ($pendingAds as $ad) {
                 try {
-                    // 更新状态为发送中
-                    $ad->status = 1;
-                    $ad->save();
+                    // 🚀 启动时发送提示
+                    $isStartupSend = empty($ad->last_sent_time);
+                    if ($isStartupSend) {
+                        Log::info("广告ID {$ad->id} - 启动时首次发送");
+                    }
                     
+                    // 发送广告
                     $sendResults = $this->telegramService->sendToAllGroups(
                         'advertisement_notify',
                         $ad->toArray(),
@@ -283,23 +320,41 @@ class MonitorNotificationService
                     
                     $success = array_sum(array_column($sendResults, 'success'));
                     $total = count($sendResults);
+                    $failed = $total - $success;
                     
-                    // 更新广告状态
-                    $ad->status = 2; // 已发送
-                    $ad->sent_count = $success;
-                    $ad->total_count = $total;
+                    // 更新广告统计
+                    $ad->total_sent_count = ($ad->total_sent_count ?? 0) + 1;
+                    $ad->success_count = ($ad->success_count ?? 0) + $success;
+                    $ad->failed_count = ($ad->failed_count ?? 0) + $failed;
+                    $ad->last_sent_time = $currentTime;
+                    
+                    // 根据发送模式更新状态
+                    if ($ad->send_mode == 1) {
+                        // 一次性发送，标记为已发送
+                        $ad->is_sent = 1;
+                        $ad->status = 2; // 已完成
+                    } elseif ($ad->send_mode == 2) {
+                        // 每日定时，计算下次发送时间
+                        $this->calculateNextDailySendTime($ad, $currentTime);
+                    } elseif ($ad->send_mode == 3) {
+                        // 循环间隔，计算下次发送时间
+                        $nextTime = new \DateTime($currentTime);
+                        $nextTime->add(new \DateInterval('PT' . $ad->interval_minutes . 'M'));
+                        $ad->next_send_time = $nextTime->format('Y-m-d H:i:s');
+                    }
+                    
                     $ad->save();
                     
                     $result['sent'] += $success;
-                    $result['failed'] += ($total - $success);
+                    $result['failed'] += $failed;
                     
-                    Log::info("广告发送完成 - ID: {$ad->id}, 成功: {$success}, 失败: " . ($total - $success));
+                    $logMessage = "广告发送完成 - ID: {$ad->id}, 模式: {$ad->send_mode}, 成功: {$success}, 失败: {$failed}";
+                    if ($isStartupSend) {
+                        $logMessage .= " (启动首发)";
+                    }
+                    Log::info($logMessage);
                     
                 } catch (\Exception $e) {
-                    // 发送失败，恢复状态
-                    $ad->status = 0;
-                    $ad->save();
-                    
                     $result['failed']++;
                     $result['errors'][] = "广告ID {$ad->id}: " . $e->getMessage();
                     Log::error("广告发送失败 - ID: {$ad->id}, 错误: " . $e->getMessage());
@@ -312,6 +367,38 @@ class MonitorNotificationService
         }
         
         return $result;
+    }
+
+    /**
+     * 计算每日定时广告的下次发送时间
+     */
+    private function calculateNextDailySendTime($ad, string $currentTime): void
+    {
+        if (empty($ad->daily_times)) {
+            return;
+        }
+        
+        $currentDateTime = new \DateTime($currentTime);
+        $times = explode(',', $ad->daily_times);
+        $currentTimeOnly = $currentDateTime->format('H:i');
+        
+        // 找到今天剩余的发送时间
+        $remainingTimes = array_filter($times, function($time) use ($currentTimeOnly) {
+            return $time > $currentTimeOnly;
+        });
+        
+        if (!empty($remainingTimes)) {
+            // 今天还有发送时间
+            $nextTime = min($remainingTimes);
+            $nextDateTime = new \DateTime($currentDateTime->format('Y-m-d') . ' ' . $nextTime . ':00');
+        } else {
+            // 今天没有了，设置为明天第一个时间
+            $nextTime = min($times);
+            $nextDateTime = new \DateTime($currentDateTime->format('Y-m-d') . ' ' . $nextTime . ':00');
+            $nextDateTime->add(new \DateInterval('P1D'));
+        }
+        
+        $ad->next_send_time = $nextDateTime->format('Y-m-d H:i:s');
     }
     
     /**

@@ -6,6 +6,12 @@
  */
 
 return [
+    // 系统启动通知模板 - 简单版本
+    'system_startup_notify' => [
+        'type' => 'text',
+        'text' => "🤖 机器人已上线\n\n⏰ {time}"
+    ],
+
     // 充值通知模板 - 图片 + 简单文字
     'recharge_notify' => [
         'type' => 'photo',
