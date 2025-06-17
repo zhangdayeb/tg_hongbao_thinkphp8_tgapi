@@ -106,13 +106,7 @@ class TelegramController extends BaseTelegramController
             $this->log($debugFile, "❌ 缺少update_id字段");
             return false;
         }
-        
-        // 检查是否包含消息或回调查询
-        if (!isset($data['message']) && !isset($data['callback_query']) && !isset($data['inline_query'])) {
-            $this->log($debugFile, "❌ 不包含有效的消息类型");
-            return false;
-        }
-        
+               
         $this->log($debugFile, "✅ 数据结构验证通过");
         return true;
     }
