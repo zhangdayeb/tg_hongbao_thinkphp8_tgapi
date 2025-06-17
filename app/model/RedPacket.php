@@ -9,7 +9,7 @@ use app\common\ValidatorHelper;
 use app\utils\RedPacketAlgorithm; // 🔥 新增：引入算法工具类
 use think\Model;
 use think\facade\Db;
-
+use think\facade\Log;  // 🔥 添加这一行！确保使用正确的 Log 类
 /**
  * 红包模型
  */
@@ -860,33 +860,43 @@ class RedPacket extends Model
         cache($cacheKey, $amounts, 86400);
     }
     
-    /**
-     * 🔥 修复：改进金额分配算法
-     */
-    private function getOneAmount(): float
-    {
-        // 如果是最后一个红包，返回剩余所有金额
-        if ($this->remain_count == 1) {
-            return $this->remain_amount;
-        }
-        
-        // 确保至少留给每个剩余红包 0.01
-        $minReserve = ($this->remain_count - 1) * 0.01;
-        $maxAmount = $this->remain_amount - $minReserve;
-        
-        // 确保金额不会太小
-        $minAmount = 0.01;
-        $maxAmount = max($minAmount, min($maxAmount, $this->remain_amount * 0.5));
-        
-        if ($maxAmount <= $minAmount) {
-            return $minAmount;
-        }
-        
-        // 生成随机金额
-        $amount = mt_rand($minAmount * 100, $maxAmount * 100) / 100;
-        
-        return round($amount, 2);
+/**
+ * 🔥 修复：改进金额分配算法，解决 mt_rand 类型问题
+ */
+private function getOneAmount(): float
+{
+    // 如果是最后一个红包，返回剩余所有金额
+    if ($this->remain_count == 1) {
+        return $this->remain_amount;
     }
+    
+    // 确保至少留给每个剩余红包 0.01
+    $minReserve = ($this->remain_count - 1) * 0.01;
+    $maxAmount = $this->remain_amount - $minReserve;
+    
+    // 确保金额不会太小
+    $minAmount = 0.01;
+    $maxAmount = max($minAmount, min($maxAmount, $this->remain_amount * 0.5));
+    
+    if ($maxAmount <= $minAmount) {
+        return $minAmount;
+    }
+    
+    // 🔥 修复：将浮点数转换为整数，避免 mt_rand 类型错误
+    $minInt = (int)round($minAmount * 100);  // 转换为分
+    $maxInt = (int)round($maxAmount * 100);  // 转换为分
+    
+    // 确保范围有效
+    if ($maxInt <= $minInt) {
+        return $minAmount;
+    }
+    
+    // 生成随机金额（以分为单位）
+    $randomInt = mt_rand($minInt, $maxInt);
+    $amount = $randomInt / 100;  // 转换回元
+    
+    return round($amount, 2);
+}
     
     /**
      * 设置手气最佳 - 🔥 增强：使用算法工具类查找最佳

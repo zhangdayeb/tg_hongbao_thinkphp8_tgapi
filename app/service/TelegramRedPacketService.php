@@ -551,210 +551,258 @@ class TelegramRedPacketService
         Cache::delete($key);
     }
     
-    public function grabRedPacket($packetId, $userId, $userTgId, $username)
-    {
-        // 🔥 修复1：使用更具体的锁键名，避免冲突
-        $lockKey = "redpacket_grab_lock_{$packetId}_{$userId}_" . date('YmdH'); // 加入时间防止跨小时冲突
-        
-        try {
-            // 基础验证
-            if (empty($userId) || empty($userTgId)) {
-                return [
-                    'success' => false,
-                    'msg' => '用户信息不完整，请重新进入'
-                ];
-            }
-            
-            if (empty($username)) {
-                $username = "用户{$userId}";
-            }
-            
-            Log::info('抢红包请求', [
-                'packet_id' => $packetId,
+
+
+public function grabRedPacket($packetId, $userId, $userTgId, $username)
+{
+    try {
+        Log::info('=== 开始抢红包业务逻辑 ===', [
+            'packet_id' => $packetId,
+            'user_id' => $userId,
+            'user_tg_id' => $userTgId,
+            'username' => $username,
+            'method' => 'grabRedPacket',
+            'timestamp' => date('Y-m-d H:i:s')
+        ]);
+
+        // 基础验证
+        if (empty($userId) || empty($userTgId)) {
+            Log::warning('基础验证失败', [
                 'user_id' => $userId,
                 'user_tg_id' => $userTgId,
-                'username' => $username,
-                'lock_key' => $lockKey
+                'reason' => 'empty_user_info'
             ]);
-            
-            // 🔥 修复2：检查缓存前先记录状态
-            $cacheExists = Cache::has($lockKey);
-            if ($cacheExists) {
-                $cacheValue = Cache::get($lockKey);
-                $cacheTime = time() - ($cacheValue['timestamp'] ?? 0);
-                
-                Log::warning('发现缓存锁', [
-                    'lock_key' => $lockKey,
-                    'cache_value' => $cacheValue,
-                    'cache_age_seconds' => $cacheTime
-                ]);
-                
-                // 🔥 修复3：如果缓存超过15秒，强制清除
-                if ($cacheTime > 15) {
-                    Cache::delete($lockKey);
-                    Log::info('强制清除过期缓存锁', ['lock_key' => $lockKey]);
-                } else {
-                    // return [
-                    //     'success' => false,
-                    //     'msg' => "操作过于频繁，请等待 " . (15 - $cacheTime) . " 秒后重试"
-                    // ];
-                }
-            }
-            
-            // 🔥 修复4：设置带时间戳的锁，便于调试
-            $lockData = [
-                'user_id' => $userId,
-                'packet_id' => $packetId,
-                'timestamp' => time(),
-                'action' => 'grab_redpacket'
+            return [
+                'success' => false,
+                'msg' => '用户信息不完整，请重新进入'
             ];
-            Cache::set($lockKey, $lockData, 15); // 15秒锁定
-            
-            Log::info('设置抢红包锁', [
-                'lock_key' => $lockKey,
-                'lock_data' => $lockData
+        }
+
+        if (empty($username)) {
+            $username = "用户{$userId}";
+            Log::info('用户名为空，使用默认用户名', ['username' => $username]);
+        }
+
+        Log::info('基础验证通过', [
+            'user_id' => $userId,
+            'user_tg_id' => $userTgId,
+            'username' => $username
+        ]);
+
+        // 🔥 修复：正确的红包查询方式
+        Log::info('开始查询红包信息', ['packet_id' => $packetId]);
+        
+        // 使用 packet_id 字段查询，而不是主键 id
+        $redPacket = \app\model\RedPacket::where('packet_id', $packetId)->lock(true)->find();
+        
+        if (!$redPacket) {
+            Log::warning('红包不存在', ['packet_id' => $packetId]);
+            return [
+                'success' => false,
+                'msg' => '红包不存在或已过期'
+            ];
+        }
+
+        Log::info('红包信息查询成功', [
+            'packet_id' => $redPacket->packet_id,
+            'database_id' => $redPacket->id,
+            'status' => $redPacket->status,
+            'remain_count' => $redPacket->remain_count,
+            'remain_amount' => $redPacket->remain_amount,
+            'sender_id' => $redPacket->sender_id,
+            'expire_time' => $redPacket->expire_time
+        ]);
+
+        // 检查红包是否过期
+        Log::info('检查红包过期时间', [
+            'expire_time' => $redPacket->expire_time,
+            'expire_timestamp' => strtotime($redPacket->expire_time),
+            'current_time' => time(),
+            'is_expired' => strtotime($redPacket->expire_time) < time()
+        ]);
+
+        if (strtotime($redPacket->expire_time) < time()) {
+            Log::warning('红包已过期', [
+                'expire_time' => $redPacket->expire_time,
+                'current_time' => date('Y-m-d H:i:s')
             ]);
-            
-            // 获取红包信息
-            $redPacket = \app\model\RedPacket::lock(true)->find($packetId);
-            if (!$redPacket) {
-                Cache::delete($lockKey);
-                return [
-                    'success' => false,
-                    'msg' => '红包不存在或已过期'
-                ];
-            }
-            
-            // 详细状态检查
-            Log::info('红包状态检查', [
-                'packet_id' => $redPacket->packet_id,
-                'status' => $redPacket->status,
+            return [
+                'success' => false,
+                'msg' => '红包已过期'
+            ];
+        }
+
+        // 检查剩余数量
+        Log::info('检查剩余数量', [
+            'remain_count' => $redPacket->remain_count,
+            'current_status' => $redPacket->status
+        ]);
+
+        if ($redPacket->remain_count <= 0) {
+            Log::warning('红包剩余数量为0', [
                 'remain_count' => $redPacket->remain_count,
-                'remain_amount' => $redPacket->remain_amount,
-                'expire_time' => $redPacket->expire_time
+                'status' => $redPacket->status
             ]);
             
-            // 检查红包是否过期
-            if (strtotime($redPacket->expire_time) < time()) {
-                Cache::delete($lockKey);
-                return [
-                    'success' => false,
-                    'msg' => '红包已过期'
-                ];
+            if ($redPacket->status == 1) {
+                Log::info('更新红包状态为已完成');
+                $redPacket->updateToCompleted();
             }
-            
-            // 检查剩余数量
-            if ($redPacket->remain_count <= 0) {
-                if ($redPacket->status == 1) {
-                    $redPacket->updateToCompleted();
-                }
-                Cache::delete($lockKey);
-                return [
-                    'success' => false,
-                    'msg' => '红包已被抢完'
-                ];
-            }
-            
-            // 检查红包状态
-            if ($redPacket->status !== 1) {
-                $statusTexts = [
-                    0 => '红包已禁用',
-                    2 => '红包已完成', 
-                    3 => '红包已过期',
-                    4 => '红包已撤回',
-                    5 => '红包已取消',
-                ];
-                $statusText = $statusTexts[$redPacket->status] ?? '红包状态异常';
-                
-                Cache::delete($lockKey);
-                return [
-                    'success' => false,
-                    'msg' => $statusText
-                ];
-            }
-            
-            // 检查重复抢取
-            $existingRecord = \app\model\RedPacketRecord::where([
-                'packet_id' => $redPacket->packet_id,
-                'user_id' => $userId
-            ])->find();
-            
-            if ($existingRecord) {
-                Cache::delete($lockKey);
-                return [
-                    'success' => false,
-                    'msg' => '您已经抢过这个红包了'
-                ];
-            }
-            
-            // 检查是否是自己发的红包
-            if ($redPacket->sender_id == $userId) {
-                Cache::delete($lockKey);
-                return [
-                    'success' => false,
-                    'msg' => '不能抢自己发的红包'
-                ];
-            }
-            
-            // 执行抢红包
-            Db::startTrans();
-            
-            $result = $redPacket->grab($userId, $userTgId, $username);
-            
-            if (!$result['success']) {
-                Db::rollback();
-                Cache::delete($lockKey);
-                return [
-                    'success' => false,
-                    'msg' => $result['message']
-                ];
-            }
-            
-            Db::commit();
-            
-            // 🔥 修复5：成功后立即清除锁
-            Cache::delete($lockKey);
-            
-            Log::info('抢红包成功完成', [
-                'packet_id' => $redPacket->packet_id,
-                'user_id' => $userId,
-                'amount' => $result['amount'],
-                'grab_order' => $result['grab_order'],
-                'lock_cleared' => true
-            ]);
             
             return [
-                'success' => true,
-                'data' => [
-                    'amount' => $result['amount'],
-                    'grab_order' => $result['grab_order'],
-                    'is_best_luck' => $result['is_best'] ?? false,
-                    'is_completed' => $result['is_completed'] ?? false
-                ]
+                'success' => false,
+                'msg' => '红包已被抢完'
             ];
+        }
+
+        // 检查红包状态
+        Log::info('检查红包状态', [
+            'current_status' => $redPacket->status,
+            'expected_status' => 1
+        ]);
+
+        if ($redPacket->status !== 1) {
+            $statusTexts = [
+                0 => '红包已禁用',
+                2 => '红包已完成', 
+                3 => '红包已过期',
+                4 => '红包已撤回',
+                5 => '红包已取消',
+            ];
+            $statusText = $statusTexts[$redPacket->status] ?? '红包状态异常';
             
-        } catch (\Exception $e) {
-            if (Db::inTransaction()) {
-                Db::rollback();
-            }
-            
-            // 🔥 修复6：异常时必须清除锁
-            Cache::delete($lockKey);
-            
-            Log::error('抢红包异常', [
-                'packet_id' => $packetId,
-                'user_id' => $userId,
-                'error' => $e->getMessage(),
-                'lock_key' => $lockKey,
-                'lock_cleared' => true
+            Log::warning('红包状态异常', [
+                'status' => $redPacket->status,
+                'status_text' => $statusText
             ]);
             
             return [
                 'success' => false,
-                'msg' => '系统异常: ' . $e->getMessage()
+                'msg' => $statusText
             ];
         }
+
+        // 检查重复抢取
+        Log::info('检查是否重复抢取', [
+            'packet_id' => $redPacket->packet_id,
+            'user_id' => $userId
+        ]);
+
+        $existingRecord = \app\model\RedPacketRecord::where([
+            'packet_id' => $redPacket->packet_id,
+            'user_id' => $userId
+        ])->find();
+        
+        if ($existingRecord) {
+            Log::warning('用户已抢过此红包', [
+                'packet_id' => $redPacket->packet_id,
+                'user_id' => $userId,
+                'existing_record_id' => $existingRecord->id ?? 'unknown'
+            ]);
+            
+            return [
+                'success' => false,
+                'msg' => '您已经抢过这个红包了'
+            ];
+        }
+
+        // 检查是否是自己发的红包
+        Log::info('检查发送者', [
+            'sender_id' => $redPacket->sender_id,
+            'current_user_id' => $userId,
+            'is_self' => $redPacket->sender_id == $userId
+        ]);
+
+        if ($redPacket->sender_id == $userId) {
+            Log::warning('不能抢自己的红包', [
+                'sender_id' => $redPacket->sender_id,
+                'user_id' => $userId
+            ]);
+            
+            return [
+                'success' => false,
+                'msg' => '不能抢自己发的红包'
+            ];
+        }
+
+        // 执行抢红包
+        Log::info('开始执行抢红包业务', [
+            'packet_id' => $redPacket->packet_id,
+            'user_id' => $userId,
+            'about_to_start_transaction' => true
+        ]);
+
+        Db::startTrans();
+        Log::info('数据库事务已开启');
+        
+        $result = $redPacket->grab($userId, $userTgId, $username);
+        
+        Log::info('抢红包方法执行完成', [
+            'result' => $result,
+            'success' => $result['success'] ?? false
+        ]);
+        
+        if (!$result['success']) {
+            Log::warning('抢红包失败，回滚事务', [
+                'result' => $result,
+                'message' => $result['message'] ?? 'unknown'
+            ]);
+            
+            Db::rollback();
+            
+            return [
+                'success' => false,
+                'msg' => $result['message']
+            ];
+        }
+
+        Log::info('抢红包成功，提交事务', [
+            'amount' => $result['amount'] ?? 'unknown',
+            'grab_order' => $result['grab_order'] ?? 'unknown'
+        ]);
+
+        Db::commit();
+        
+        Log::info('抢红包成功完成', [
+            'packet_id' => $redPacket->packet_id,
+            'user_id' => $userId,
+            'amount' => $result['amount'],
+            'grab_order' => $result['grab_order'],
+            'is_best_luck' => $result['is_best'] ?? false,
+            'is_completed' => $result['is_completed'] ?? false
+        ]);
+
+        return [
+            'success' => true,
+            'data' => [
+                'amount' => $result['amount'],
+                'grab_order' => $result['grab_order'],
+                'is_best_luck' => $result['is_best'] ?? false,
+                'is_completed' => $result['is_completed'] ?? false
+            ]
+        ];
+        
+    } catch (\Exception $e) {
+        Log::error('抢红包异常', [
+            'packet_id' => $packetId,
+            'user_id' => $userId,
+            'error_message' => $e->getMessage(),
+            'error_file' => $e->getFile(),
+            'error_line' => $e->getLine(),
+            'trace' => $e->getTraceAsString()
+        ]);
+
+        if (Db::inTransaction()) {
+            Db::rollback();
+            Log::info('异常时回滚事务');
+        }
+
+        return [
+            'success' => false,
+            'msg' => '系统异常: ' . $e->getMessage()
+        ];
     }
+}
 
     /**
      * 🔥 新增：清除用户所有抢红包锁的方法
