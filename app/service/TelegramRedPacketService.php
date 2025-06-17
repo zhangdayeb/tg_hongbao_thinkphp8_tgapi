@@ -552,6 +552,9 @@ class TelegramRedPacketService
     }
     
 
+<?php
+
+// 完整的 grabRedPacket 方法 - TelegramRedPacketService.php
 
 public function grabRedPacket($packetId, $userId, $userTgId, $username)
 {
@@ -763,13 +766,18 @@ public function grabRedPacket($packetId, $userId, $userTgId, $username)
 
         Db::commit();
         
+        // 🔥 获取更新后的红包信息，用于返回剩余信息
+        $redPacket->refresh(); // 刷新红包数据
+        
         Log::info('抢红包成功完成', [
             'packet_id' => $redPacket->packet_id,
             'user_id' => $userId,
             'amount' => $result['amount'],
             'grab_order' => $result['grab_order'],
             'is_best_luck' => $result['is_best'] ?? false,
-            'is_completed' => $result['is_completed'] ?? false
+            'is_completed' => $result['is_completed'] ?? false,
+            'remain_count' => $redPacket->remain_count,  // 🔥 添加剩余信息到日志
+            'remain_amount' => $redPacket->remain_amount
         ]);
 
         return [
@@ -778,7 +786,10 @@ public function grabRedPacket($packetId, $userId, $userTgId, $username)
                 'amount' => $result['amount'],
                 'grab_order' => $result['grab_order'],
                 'is_best_luck' => $result['is_best'] ?? false,
-                'is_completed' => $result['is_completed'] ?? false
+                'is_completed' => $result['is_completed'] ?? false,
+                // 🔥 添加剩余信息到返回数据
+                'remain_count' => $redPacket->remain_count,
+                'remain_amount' => $redPacket->remain_amount
             ]
         ];
         
@@ -904,18 +915,18 @@ public function grabRedPacket($packetId, $userId, $userTgId, $username)
     {
         if ($redPacket->type == self::TYPE_AVERAGE) {
             // 平均分配
-            return round($redPacket->remain_amount / $redPacket->remain_acount, 2);
+            return round($redPacket->remain_amount / $redPacket->remain_count, 2);
         } else {
             // 拼手气红包
-            if ($redPacket->remain_acount == 1) {
+            if ($redPacket->remain_count == 1) {
                 // 最后一个红包，返回剩余所有金额
                 return $redPacket->remain_amount;
             }
             
             // 简单随机算法
             $min = 0.01;
-            $max = ($redPacket->remain_amount / $redPacket->remain_acount) * 2;
-            $max = min($max, $redPacket->remain_amount - ($redPacket->remain_acount - 1) * $min);
+            $max = ($redPacket->remain_amount / $redPacket->remain_count) * 2;
+            $max = min($max, $redPacket->remain_amount - ($redPacket->remain_count - 1) * $min);
             
             return round(mt_rand($min * 100, $max * 100) / 100, 2);
         }

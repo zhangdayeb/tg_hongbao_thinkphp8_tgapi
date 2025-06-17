@@ -431,35 +431,43 @@ public function bridgeGrabRedPacket(string $packetId, int $chatId, string $debug
         }
     }
 
-    /**
-     * 发送抢红包成功消息
-     */
-    private function sendGrabSuccessMessage(int $chatId, array $data, string $debugFile): void
-    {
-        $amount = $data['amount'];
-        $grabOrder = $data['grab_order'];
-        $isBestLuck = $data['is_best_luck'] ?? false;
-        $remainCount = $data['remain_acount'] ?? 0;
-        $remainAmount = $data['remain_amount'] ?? 0;
-        
-        $message = "🎉 *恭喜抢到红包！*\n\n";
-        $message .= "💰 抢到金额：`{$amount} USDT`\n";
-        $message .= "🎲 第 {$grabOrder} 个领取\n";
-        
-        if ($isBestLuck) {
-            $message .= "👑 *手气最佳！*\n";
-        }
-        
-        $message .= "\n📊 *红包状态*\n";
-        $message .= "📦 剩余个数：{$remainCount} 个\n";
-        $message .= "💎 剩余金额：{$remainAmount} USDT\n";
-        
-        if ($remainCount == 0) {
-            $message .= "\n🎊 红包已被抢完！";
-        }
-        
-        $this->bridgeSendMessage($chatId, $message, $debugFile);
+/**
+ * 发送抢红包成功消息
+ */
+private function sendGrabSuccessMessage(int $chatId, array $data, string $debugFile): void
+{
+    $amount = $data['amount'];
+    $grabOrder = $data['grab_order'];
+    $isBestLuck = $data['is_best_luck'] ?? false;
+    
+    // 🔥 修复：变量名错误，并添加调试日志
+    $this->log($debugFile, "构建成功消息 - 原始数据: " . json_encode($data));
+    
+    $remainCount = $data['remain_count'] ?? 0;  // 修复：去掉多余的 'a'
+    $remainAmount = $data['remain_amount'] ?? 0;
+    
+    $this->log($debugFile, "剩余信息 - 个数: {$remainCount}, 金额: {$remainAmount}");
+    
+    $message = "🎉 *恭喜抢到红包！*\n\n";
+    $message .= "💰 抢到金额：`{$amount} USDT`\n";
+    $message .= "🎲 第 {$grabOrder} 个领取\n";
+    
+    if ($isBestLuck) {
+        $message .= "👑 *手气最佳！*\n";
     }
+    
+    $message .= "\n📊 *红包状态*\n";
+    $message .= "📦 剩余个数：{$remainCount} 个\n";
+    $message .= "💎 剩余金额：{$remainAmount} USDT\n";
+    
+    if ($remainCount == 0) {
+        $message .= "\n🎊 红包已被抢完！";
+    }
+    
+    $this->log($debugFile, "发送成功消息: " . $message);
+    $this->bridgeSendMessage($chatId, $message, $debugFile);
+}
+
     /**
      * 桥接方法：获取红包历史
      */
