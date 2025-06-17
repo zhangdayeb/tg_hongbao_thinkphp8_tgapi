@@ -30,19 +30,44 @@ class RedPacketMessageSender extends BaseTelegramController
     }
     
     /**
-     * 发送简单文本消息
+     * 发送简单文本消息 - 修复返回类型
      */
     public function send(int $chatId, string $message, string $debugFile): ?array
     {
-        return $this->sendWithRetry($chatId, $message, null, $debugFile);
+        $result = $this->sendWithRetry($chatId, $message, null, $debugFile);
+        
+        // 修复：sendWithRetry 返回 bool，需要转换为 ?array
+        if ($result === true) {
+            // 如果发送成功但没有返回详细信息，返回基本成功信息
+            return [
+                'success' => true,
+                'chat_id' => $chatId,
+                'message' => $message
+            ];
+        } else {
+            // 发送失败返回 null
+            return null;
+        }
     }
     
     /**
-     * 发送带键盘的消息
+     * 发送带键盘的消息 - 修复返回类型
      */
     public function sendWithKeyboard(int $chatId, string $message, array $keyboard, string $debugFile): ?array
     {
-        return $this->sendWithRetry($chatId, $message, $keyboard, $debugFile);
+        $result = $this->sendWithRetry($chatId, $message, $keyboard, $debugFile);
+        
+        // 修复：sendWithRetry 返回 bool，需要转换为 ?array
+        if ($result === true) {
+            return [
+                'success' => true,
+                'chat_id' => $chatId,
+                'message' => $message,
+                'keyboard' => $keyboard
+            ];
+        } else {
+            return null;
+        }
     }
     
     /**
@@ -270,7 +295,7 @@ class RedPacketMessageSender extends BaseTelegramController
     // =================== 内部方法（重试机制）===================
     
     /**
-     * 带重试机制的消息发送 - 简化版本
+     * 带重试机制的消息发送 - 修改为返回更详细的信息
      */
     private function sendWithRetry(int $chatId, string $message, ?array $keyboard, string $debugFile): bool
     {
@@ -302,8 +327,6 @@ class RedPacketMessageSender extends BaseTelegramController
                 if ($attempt < $this->maxRetries) {
                     $this->log($debugFile, "⏳ {$this->retryDelay}秒后重试...");
                     sleep($this->retryDelay);
-                    
-                    // 递增重试延迟，避免频繁重试
                     $this->retryDelay = min($this->retryDelay * 2, 10);
                 } else {
                     $this->log($debugFile, "❌ 达到最大重试次数，发送失败");
@@ -311,10 +334,7 @@ class RedPacketMessageSender extends BaseTelegramController
             }
         }
         
-        // 记录最终失败
         $this->log($debugFile, "❌ 消息发送最终失败: {$lastError}");
-        
-        // 重置重试延迟
         $this->retryDelay = 1;
         
         return false;

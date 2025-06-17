@@ -342,14 +342,7 @@ class TelegramRedPacketService
     // =================== 核心数据库操作 ===================
     
     /**
-     * 创建红包记录 - 仅写入数据库
-     * 
-     * @param User $user 发送用户
-     * @param float $amount 红包总金额
-     * @param int $count 红包个数
-     * @param string $title 红包标题
-     * @param array|null $chatContext 聊天上下文
-     * @return array 写入结果
+     * 创建红包记录 - 修复版本（包含余额扣除和流水记录）
      */
     public function createRedPacket(User $user, float $amount, int $count, string $title, ?array $chatContext = null): array
     {
@@ -366,72 +359,145 @@ class TelegramRedPacketService
             // 基础参数验证
             $this->validateRedPacketParams($amount, $count, $title);
             
-            // 构建红包数据（完全匹配数据库字段）
-            $redPacketData = [
-                'packet_id' => 'HB' . time() . rand(1000, 9999), // 红包唯一标识
-                'title' => $title,
-                'total_amount' => $amount,
-                'total_count' => $count,
-                'remain_amount' => $amount,      // 剩余金额
-                'remain_count' => $count,        // 剩余个数  
-                'packet_type' => self::TYPE_RANDOM, // 红包类型
-                'sender_id' => $user->id,
-                'sender_tg_id' => $user->tg_id ?? $user->user_id,
-                'expire_time' => date('Y-m-d H:i:s', time() + 86400), // 24小时后过期
-                'status' => 1, // 1正常
-                'is_system' => 0, // 0非系统红包
-                'created_at' => date('Y-m-d H:i:s')
-            ];
-            
-            // 添加聊天上下文信息
-            if ($chatContext) {
-                $redPacketData['chat_id'] = (string)($chatContext['chat_id'] ?? 0);
-                $redPacketData['chat_type'] = $chatContext['chat_type'] ?? 'group';
-                // 注意：数据库中没有 chat_title 字段，所以不添加
+            // 验证用户余额是否足够
+            if ($user->money_balance < $amount) {
+                return [
+                    'success' => false,
+                    'msg' => '余额不足，当前余额：' . $user->money_balance . ' USDT',
+                    'packet_id' => null,
+                    'data' => null
+                ];
             }
             
-            // 写入数据库
-            $insertId = Db::name('tg_red_packets')->insertGetId($redPacketData);
+            // 开启数据库事务
+            Db::startTrans();
             
-            if (!$insertId) {
-                throw new \Exception('红包数据写入失败');
-            }
-            
-            Log::info('红包数据写入成功', [
-                'record_id' => $insertId,
-                'user_id' => $user->id,
-                'amount' => $amount,
-                'count' => $count
-            ]);
-            
-            return [
-                'success' => true,
-                'msg' => '红包数据已记录',
-                'packet_id' => $insertId,
-                'data' => [
-                    'id' => $insertId,
+            try {
+                // 构建红包数据
+                $redPacketData = [
+                    'packet_id' => 'HB' . time() . rand(1000, 9999),
+                    'title' => $title,
+                    'total_amount' => $amount,
+                    'total_count' => $count,
+                    'remain_amount' => $amount,
+                    'remain_count' => $count,
+                    'packet_type' => self::TYPE_RANDOM,
+                    'sender_id' => $user->id,
+                    'sender_tg_id' => $user->tg_id ?? $user->user_id,
+                    'expire_time' => date('Y-m-d H:i:s', time() + 86400),
+                    'status' => 1,
+                    'is_system' => 0,
+                    'created_at' => date('Y-m-d H:i:s')
+                ];
+                
+                // 添加聊天上下文
+                if ($chatContext) {
+                    $redPacketData['chat_id'] = (string)($chatContext['chat_id'] ?? 0);
+                    $redPacketData['chat_type'] = $chatContext['chat_type'] ?? 'private';
+                }
+                
+                // 1. 插入红包记录
+                $redPacketId = Db::name('tg_red_packets')->insertGetId($redPacketData);
+                
+                if (!$redPacketId) {
+                    throw new \Exception('红包记录创建失败');
+                }
+                
+                Log::info('红包记录创建成功', ['red_packet_id' => $redPacketId, 'packet_id' => $redPacketData['packet_id']]);
+                
+                // 2. 扣除用户余额
+                $beforeBalance = $user->money_balance;
+                $afterBalance = $beforeBalance - $amount;
+                
+                $updateResult = Db::name('common_user')
+                    ->where('id', $user->id)
+                    ->update(['money_balance' => $afterBalance]);
+                    
+                if (!$updateResult) {
+                    throw new \Exception('用户余额扣除失败');
+                }
+                
+                Log::info('用户余额扣除成功', [
+                    'user_id' => $user->id,
+                    'before_balance' => $beforeBalance,
+                    'after_balance' => $afterBalance,
+                    'amount' => $amount
+                ]);
+                
+                // 3. 记录资金流水
+                $moneyLogData = [
+                    'uid' => $user->id,
+                    'type' => 2, // 支出类型
+                    'status' => 508, // 发红包状态（根据 MoneyLog 中的状态定义）
+                    'money_before' => $beforeBalance,
+                    'money_end' => $afterBalance,
+                    'money' => $amount, // 正数金额
+                    'source_id' => $redPacketId,
+                    'mark' => "发红包 - {$redPacketData['packet_id']} - {$title}",
+                    'create_time' => date('Y-m-d H:i:s'),
+                ];
+                
+                $logResult = Db::name('common_pay_money_log')->insert($moneyLogData);
+                
+                if (!$logResult) {
+                    throw new \Exception('资金流水记录失败');
+                }
+                
+                Log::info('资金流水记录成功', $moneyLogData);
+                
+                // 提交事务
+                Db::commit();
+                
+                // 更新用户对象的余额（避免后续使用过期数据）
+                $user->money_balance = $afterBalance;
+                
+                Log::info('红包数据写入成功', [
+                    'packet_id' => $redPacketData['packet_id'],
+                    'red_packet_id' => $redPacketId,
+                    'user_balance_updated' => true,
+                    'money_log_created' => true
+                ]);
+                
+                return [
+                    'success' => true,
+                    'msg' => '红包数据已记录',
+                    'packet_id' => $redPacketId,
+                    'data' => [
+                        'id' => $redPacketId,
+                        'packet_id' => $redPacketData['packet_id'],
+                        'amount' => $amount,
+                        'count' => $count,
+                        'title' => $title,
+                        'user_balance_before' => $beforeBalance,
+                        'user_balance_after' => $afterBalance
+                    ]
+                ];
+                
+            } catch (\Exception $e) {
+                // 回滚事务
+                Db::rollback();
+                
+                Log::error('红包创建过程中发生异常', [
+                    'user_id' => $user->id,
                     'amount' => $amount,
-                    'count' => $count,
-                    'title' => $title
-                ]
-            ];
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                
+                throw $e;
+            }
             
         } catch (\Exception $e) {
-            Log::error('红包数据写入失败', [
+            Log::error('红包创建失败', [
                 'user_id' => $user->id,
-                'amount' => $amount,
-                'count' => $count,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error' => $e->getMessage()
             ]);
             
             return [
                 'success' => false,
-                'msg' => '红包数据写入失败: ' . $e->getMessage(),
-                'data' => [
-                    'error_code' => $e->getCode(),
-                    'error_message' => $e->getMessage()
-                ]
+                'msg' => $e->getMessage(),
+                'packet_id' => null,
+                'data' => null
             ];
         }
     }
