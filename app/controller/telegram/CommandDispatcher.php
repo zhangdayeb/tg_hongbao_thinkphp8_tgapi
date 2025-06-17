@@ -36,9 +36,9 @@ class CommandDispatcher extends BaseTelegramController
     // =================== 主要处理方法 ===================
     
     /**
-     * 处理命令
+     * 处理消息 (兼容TelegramController调用)
      */
-    public function handleCommand(array $update, string $debugFile): void
+    public function handleMessage(array $update, string $debugFile): void
     {
         try {
             $message = $update['message'] ?? [];
@@ -46,11 +46,11 @@ class CommandDispatcher extends BaseTelegramController
             $chatId = (int)($message['chat']['id'] ?? 0);
             
             if (empty($text) || $chatId === 0) {
-                $this->log($debugFile, "❌ 命令数据不完整");
+                $this->log($debugFile, "❌ 消息数据不完整");
                 return;
             }
             
-            $this->log($debugFile, "收到命令: ChatID={$chatId}, 内容={$text}");
+            $this->log($debugFile, "收到消息: ChatID={$chatId}, 内容={$text}");
             
             // 确保用户存在
             $user = $this->ensureUserExists($update, $debugFile);
@@ -59,18 +59,24 @@ class CommandDispatcher extends BaseTelegramController
                 return;
             }
             
-            // 分发命令
-            $this->dispatchCommand($text, $chatId, $user, $debugFile);
+            // 判断是命令还是普通文本
+            if (strpos($text, '/') === 0) {
+                // 是命令
+                $this->dispatchCommand($text, $chatId, $user, $debugFile);
+            } else {
+                // 是普通文本输入
+                $this->dispatchTextInput($chatId, $text, $user, $debugFile);
+            }
             
         } catch (\Exception $e) {
-            $this->handleException($e, "处理命令", $debugFile);
+            $this->handleException($e, "处理消息", $debugFile);
         }
     }
     
     /**
-     * 处理回调查询
+     * 处理回调查询 (兼容TelegramController调用)
      */
-    public function handleCallbackQuery(array $update, string $debugFile): void
+    public function handleCallback(array $update, string $debugFile): void
     {
         try {
             $callbackQuery = $update['callback_query'] ?? [];
@@ -99,34 +105,56 @@ class CommandDispatcher extends BaseTelegramController
     }
     
     /**
-     * 处理普通文本消息
+     * 处理内联查询 (兼容TelegramController调用)
      */
-    public function handleTextMessage(array $update, string $debugFile): void
+    public function handleInlineQuery(array $update, string $debugFile): void
     {
         try {
-            $message = $update['message'] ?? [];
-            $text = trim($message['text'] ?? '');
-            $chatId = (int)($message['chat']['id'] ?? 0);
+            $inlineQuery = $update['inline_query'] ?? [];
+            $queryId = $inlineQuery['id'] ?? '';
+            $query = trim($inlineQuery['query'] ?? '');
             
-            if (empty($text) || $chatId === 0) {
-                $this->log($debugFile, "❌ 文本消息数据不完整");
-                return;
-            }
+            $this->log($debugFile, "收到内联查询: QueryID={$queryId}, Query={$query}");
             
-            $this->log($debugFile, "收到文本: ChatID={$chatId}, 内容={$text}");
-            
-            // 确保用户存在
-            $user = $this->ensureUserExists($update, $debugFile);
-            if (!$user) {
-                $this->log($debugFile, "❌ 用户处理失败");
-                return;
-            }
-            
-            // 分发文本输入
-            $this->dispatchTextInput($chatId, $text, $user, $debugFile);
+            // 暂时返回空结果
+            $this->answerInlineQuery($queryId, [], $debugFile);
             
         } catch (\Exception $e) {
-            $this->handleException($e, "处理文本消息", $debugFile);
+            $this->handleException($e, "处理内联查询", $debugFile);
+        }
+    }
+    
+    /**
+     * 处理未知类型 (兼容TelegramController调用)
+     */
+    public function handleUnknown(array $update, string $debugFile): void
+    {
+        $this->log($debugFile, "收到未知类型的更新: " . json_encode($update));
+    }
+    
+    /**
+     * 回答内联查询
+     */
+    private function answerInlineQuery(string $queryId, array $results, string $debugFile): void
+    {
+        try {
+            $url = "https://api.telegram.org/bot" . $this->botToken . "/answerInlineQuery";
+            $data = [
+                'inline_query_id' => $queryId,
+                'results' => json_encode($results),
+                'cache_time' => 300
+            ];
+            
+            $response = $this->makeRequest($url, $data);
+            
+            if ($response['ok'] ?? false) {
+                $this->log($debugFile, "✅ 内联查询响应成功");
+            } else {
+                $this->log($debugFile, "❌ 内联查询响应失败: " . ($response['description'] ?? 'unknown'));
+            }
+            
+        } catch (\Exception $e) {
+            $this->log($debugFile, "❌ 内联查询响应异常: " . $e->getMessage());
         }
     }
     
@@ -451,7 +479,15 @@ class CommandDispatcher extends BaseTelegramController
                 return null;
             }
             
-            return $this->userService->createOrUpdateFromTelegram($telegramUserData, $debugFile);
+            // 提取邀请码（如果是 /start 命令）
+            $inviteCode = '';
+            if (isset($update['message']['text'])) {
+                $inviteCode = $this->extractInvitationCode($update['message']['text']);
+            }
+            
+            $this->log($debugFile, "提取到用户数据 - TG_ID: {$telegramUserData['id']}, 邀请码: " . ($inviteCode ?: '无'));
+            
+            return $this->userService->findOrCreateUser($telegramUserData, $inviteCode);
             
         } catch (\Exception $e) {
             $this->handleException($e, "确保用户存在", $debugFile);
