@@ -1,319 +1,433 @@
-# Telegram机器人系统项目说明文档
+# Telegram 客户端程序说明文档
 
 ## 📋 项目概述
 
-这是一个基于ThinkPHP 6.0开发的Telegram机器人系统，主要功能包括用户管理、充值提现、红包功能、群组管理等。系统采用模块化设计，支持多种支付方式和完善的管理后台。
+这是一个基于 **ThinkPHP 8** + **PHP 8.2** + **MySQL 5.7** 开发的 Telegram 机器人客户端程序。该程序专门设计为**客户端对接程序**，已删除管理端相关代码，专注于与 Telegram 机器人群交互和数据库表变化监控通知功能。
 
-## 🏗️ 技术架构
+## 🏗️ 技术栈
 
-### 核心技术栈
-- **后端框架**: ThinkPHP 6.0
-- **数据库**: MySQL 8.0
-- **缓存系统**: Redis
-- **消息队列**: Workerman WebSocket
-- **API通信**: Telegram Bot API
-- **开发语言**: PHP 7.4+
+- **后端框架**: ThinkPHP 8.0
+- **开发语言**: PHP 8.2
+- **数据库**: MySQL 5.7
+- **数据库时间格式**: 统一使用 datetime 格式
+- **消息格式**: 与 Telegram 交互不使用 markdown 格式
 
-### 系统特性
-- ✅ RESTful API设计
-- ✅ 模块化架构
-- ✅ 中间件支持（限流、安全验证）
-- ✅ 多环境配置
-- ✅ 完善的日志系统
-- ✅ 缓存优化
-- ✅ 安全防护机制
+## 🎯 核心功能模块
+
+### 1. 直接与 Telegram 机器人群交互的部分
+
+这是程序的核心交互模块，包含以下主要功能：
+
+#### 🤖 Telegram Webhook 接收器
+- **入口路径**: `/webhook/telegram`
+- **控制器**: `app/controller/TelegramController.php`
+- **功能**: 
+  - 接收 Telegram Bot API 的 webhook 数据
+  - 验证数据完整性和格式
+  - 转发给命令调度器处理
+
+#### 🎮 命令处理系统
+- **调度器**: `app/controller/telegram/CommandDispatcher.php`
+- **基础控制器**: `app/controller/BaseTelegramController.php`
+- **支持的命令**:
+  - `/start` - 用户注册/启动
+  - `/help` - 帮助信息
+  - `/balance` - 查询余额
+  - `/recharge` - 充值功能
+  - `/withdraw` - 提现功能
+  - 回调按钮处理
+
+#### 💰 财务交互功能
+- **充值系统**:
+  - USDT 充值（TRC20/ERC20）
+  - 汇旺支付充值
+  - 实时到账确认
+- **提现系统**:
+  - USDT 钱包提现
+  - 自动审核机制
+  - 手续费计算
+
+#### 🧧 红包交互功能
+- **发红包**: 群组红包创建和发送
+- **抢红包**: 实时抢夺机制，防重复领取
+- **红包管理**: 过期处理、退款机制
+
+#### 👥 用户管理功能
+- **用户注册**: 通过 Telegram 自动注册
+- **用户状态管理**: 正常、冻结等状态
+- **邀请系统**: 邀请码验证和奖励
+
+### 2. 监控表变化的群通知系统
+
+这是程序的自动化监控模块，实现数据库表变化的实时通知：
+
+#### 📊 数据库监控服务
+- **核心服务**: `app/service/MonitorNotificationService.php`
+- **监控范围**:
+  - 充值表(`recharge`)监控 - 新充值记录通知
+  - 提现表(`withdraw`)监控 - 新提现记录通知  
+  - 红包表(`redpacket`)监控 - 新红包记录通知
+  - 广告表(`advertisement`)监控 - 新广告发布通知
+
+#### 🔔 通知发送机制
+- **通知服务**: `app/service/TelegramNotificationService.php`
+- **发送策略**:
+  - 全群组广播（充值、提现、广告）
+  - 指定群组发送（红包通知到对应群组）
+  - 消息模板渲染
+  - 发送失败重试机制
+
+#### 📝 消息模板系统
+- **模板服务**: `app/service/MessageTemplateService.php`
+- **模板类型**:
+  - 图片模板（充值、提现、广告）
+  - 带按钮模板（红包）
+  - 纯文本模板（系统通知）
+
+#### 📈 监控配置
+- **检查间隔**: 可配置的定时检查机制
+- **时间重叠**: 防止遗漏数据的时间重叠设置
+- **缓存优化**: 使用 Redis 缓存上次检查时间
 
 ## 📁 项目结构
 
 ```
 项目根目录/
-├── app/                          # 应用目录
-│   ├── common/                   # 公共类库
-│   │   ├── SecurityHelper.php    # 安全助手类
-│   │   ├── ValidatorHelper.php   # 验证助手类
-│   │   └── helper/               # 助手类目录
-│   │       └── TemplateHelper.php # 模板助手类
-│   ├── controller/               # 控制器目录
-│   │   ├── BaseTelegramController.php # Telegram基础控制器
-│   │   ├── admin/               # 管理后台控制器
-│   │   │   └── TelegramController.php # Telegram管理控制器
-│   │   └── common/              # 公共控制器
-│   │       └── LogHelper.php     # 日志助手
-│   ├── middleware/              # 中间件目录
-│   │   └── RateLimit.php        # 限流中间件
-│   ├── model/                   # 模型目录
-│   │   ├── User.php             # 用户模型
-│   │   ├── Admin.php            # 管理员模型
-│   │   ├── TgCrowdList.php      # Telegram群组模型
-│   │   └── TgBotConfig.php      # 机器人配置模型
-│   ├── service/                 # 服务层目录
-│   │   └── TelegramBotService.php # Telegram机器人服务
-│   └── utils/                   # 工具类目录
-│       ├── TelegramKeyboard.php # Telegram键盘工具
-│       └── TelegramMessage.php  # Telegram消息工具
-├── config/                      # 配置文件目录
-│   ├── database.php             # 数据库配置
-│   ├── log.php                  # 日志配置
-│   ├── view.php                 # 视图配置
-│   ├── telegram.php             # Telegram配置
-│   └── templates/               # 消息模板目录
-│       ├── redpacket.php        # 红包模板
-│       └── payment.php          # 支付模板
-├── .env                         # 环境配置文件
-└── app/common.php               # 公共函数文件
+├── app/                                    # 应用目录
+│   ├── controller/                         # 控制器目录
+│   │   ├── TelegramController.php          # Telegram Webhook接收器
+│   │   ├── BaseTelegramController.php      # Telegram基础控制器
+│   │   └── telegram/                       # Telegram命令处理
+│   │       └── CommandDispatcher.php       # 命令调度器
+│   ├── service/                            # 服务层
+│   │   ├── TelegramService.php             # Telegram API服务
+│   │   ├── TelegramNotificationService.php # 通知发送服务
+│   │   ├── MonitorNotificationService.php  # 监控通知服务
+│   │   ├── MessageTemplateService.php      # 消息模板服务
+│   │   └── UserService.php                 # 用户服务
+│   ├── model/                              # 数据模型
+│   │   ├── User.php                        # 用户模型
+│   │   ├── TgCrowdList.php                 # Telegram群组模型
+│   │   ├── TgMessageLog.php                # 消息发送日志模型
+│   │   ├── RedPacket.php                   # 红包模型
+│   │   ├── Recharge.php                    # 充值模型
+│   │   └── Withdraw.php                    # 提现模型
+│   ├── middleware/                         # 中间件
+│   │   ├── WebhookAuth.php                 # Webhook认证中间件
+│   │   └── RateLimit.php                   # 限流中间件
+│   └── common/                             # 公共类库
+│       └── MonitorHelper.php               # 监控助手类
+├── config/                                 # 配置文件
+│   ├── telegram.php                        # Telegram配置
+│   ├── database.php                        # 数据库配置
+│   ├── cache.php                           # 缓存配置
+│   └── monitor_config.php                  # 监控配置
+├── route/                                  # 路由配置
+│   └── app.php                             # 应用路由
+└── .env                                    # 环境配置
 ```
 
-## ⚙️ 核心功能模块
+## ⚙️ 核心数据表
 
-### 1. 用户管理系统
-- **用户注册/登录**: 通过Telegram自动注册
-- **用户状态管理**: 支持正常、冻结等状态
-- **实名认证**: 支持身份证验证
-- **权限管理**: 区分普通用户、代理等角色
+### 用户相关表
+- `ntp_users` - 用户基础信息表
+- `ntp_user_invites` - 用户邀请关系表
 
-### 2. 财务系统
-- **充值功能**: 
-  - USDT充值（支持TRC20/ERC20）
-  - 汇旺支付充值
-  - 实时到账确认
-- **提现功能**:
-  - USDT钱包提现
-  - 自动审核机制
-  - 手续费计算
-- **资金流水**: 完整的交易记录
+### Telegram相关表
+- `ntp_tg_crowd_list` - Telegram群组信息表
+- `ntp_tg_message_logs` - 消息发送日志表
+- `ntp_tg_broadcasts` - 广播消息表
 
-### 3. 红包系统
-- **发红包**: 
-  - 拼手气红包
-  - 普通红包
-  - 群组红包功能
-- **抢红包**: 
-  - 实时抢夺
-  - 手气最佳奖励
-  - 防重复领取
-- **红包管理**: 
-  - 过期处理
-  - 退款机制
-  - 统计分析
+### 业务相关表
+- `ntp_recharge` - 充值记录表
+- `ntp_withdraw` - 提现记录表  
+- `ntp_redpackets` - 红包记录表
+- `ntp_advertisements` - 广告信息表
 
-### 4. Telegram机器人
-- **命令处理**: 支持/start、/help、/balance等命令
-- **交互界面**: 内联键盘菜单
-- **消息模板**: 可配置的消息模板系统
-- **多语言支持**: 模板化多语言方案
-
-### 5. 群组管理
-- **群组监控**: 实时监控群组状态
-- **广播功能**: 批量消息推送
-- **权限控制**: 机器人权限管理
-- **成员统计**: 群组数据分析
-
-### 6. 管理后台
-- **用户管理**: 用户信息查看、编辑
-- **财务管理**: 充值提现审核
-- **系统设置**: 参数配置
-- **数据统计**: 运营数据分析
-
-## 🔧 安全机制
-
-### 数据安全
-- **密码加密**: Base64编码存储
-- **签名验证**: HMAC-SHA256签名
-- **输入过滤**: 防XSS、SQL注入
-- **USDT地址验证**: 支持多种网络格式
-
-### 访问控制
-- **IP白名单**: Telegram服务器IP验证
-- **Webhook验证**: Secret Token验证
-- **限流保护**: 多级限流机制
-- **异常检测**: 自动黑名单机制
-
-### 防重复处理
-- **回调防重**: 缓存机制防重复处理
-- **交易防重**: 订单号唯一性检查
-- **消息防重**: 防止重复发送
-
-## 📊 数据库设计
-
-### 核心数据表
-- **ntp_user**: 用户信息表
-- **ntp_common_admin**: 管理员表
-- **ntp_tg_crowd_list**: Telegram群组表
-- **ntp_tg_bot_config**: 机器人配置表
-- **ntp_telegram_user_state**: 用户状态表
-
-### 数据库配置
-- 字符集: UTF8MB4
-- 时区: Asia/Shanghai
-- 引擎: InnoDB
-- 表前缀: ntp_
-
-## 🚀 部署说明
-
-### 环境要求
-- PHP >= 7.4
-- MySQL >= 8.0
-- Redis >= 5.0
-- Composer
-- 支持URL重写的Web服务器
-
-### 配置步骤
-
-1. **克隆项目代码**
-```bash
-git clone [项目地址]
-cd [项目目录]
+### 时间字段统一格式
+所有数据表的时间字段均使用 `datetime` 格式：
+```sql
+created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ```
 
-2. **安装依赖**
-```bash
-composer install
-```
+### 数据表前缀说明
+**重要备注**: ThinkPHP8 配置文件中已自动添加了 `ntp_` 表前缀，因此在数据库处理代码中可以忽略 `ntp_` 表头。
 
-3. **配置环境文件**
-```bash
-cp .env.example .env
-# 编辑.env文件，配置数据库、Redis等信息
-```
+例如：
+- 数据库实际表名：`ntp_users`
+- 模型中使用：`User::where('id', 1)->find()` （无需写 ntp_users）
+- 查询时自动添加前缀：系统会自动处理为 `SELECT * FROM ntp_users`
 
-4. **数据库迁移**
-```bash
-php think migrate:run
-```
+## 🔧 配置说明
 
-5. **配置Telegram Webhook**
-```bash
-# 设置Webhook URL
-curl -X POST "https://api.telegram.org/bot[BOT_TOKEN]/setWebhook" \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://yourdomain.com/webhook/telegram"}'
-```
-
-### 重要配置项
-
-#### .env 配置
+### 环境配置 (.env)
 ```ini
-# 应用调试
+# 应用基础配置
 APP_DEBUG = false
-LOG_LEVEL = error,warning
 
 # 数据库配置
-[DATABASE]
-TYPE = mysql
-HOSTNAME = 127.0.0.1
-DATABASE = ntp_dianji
-USERNAME = root
-PASSWORD = your_password
-HOSTPORT = 3306
-CHARSET = utf8mb4
-PREFIX = ntp_
+DB_TYPE = mysql
+DB_HOST = 127.0.0.1
+DB_NAME = ntp_dianji
+DB_USER = root
+DB_PASS = your_password
+DB_PORT = 3306
+DB_CHARSET = utf8mb4
+DB_PREFIX = ntp_
 
 # Redis配置
-[REDIS]
-HOST = 127.0.0.1
-PORT = 6379
-PASSWORD = your_redis_password
+REDIS_HOST = 127.0.0.1
+REDIS_PORT = 6379
+REDIS_PASSWORD = your_redis_password
 
-# Workerman配置
-[WORKER]
-one = websocket://0.0.0.0:2009
-two = text://0.0.0.0:3009
-two_tcp = tcp://127.0.0.1:3009
+# Telegram配置
+TELEGRAM_BOT_TOKEN = your_bot_token
+TELEGRAM_WEBHOOK_URL = https://yourdomain.com/webhook/telegram
+TELEGRAM_WEBHOOK_SECRET = your_webhook_secret
 ```
 
-#### Telegram配置
+### Telegram 配置 (config/telegram.php)
 ```php
-// config/telegram.php
 return [
-    'bot_token' => 'your_bot_token',
-    'webhook_secret' => 'your_webhook_secret',
-    'webhook_url' => 'https://yourdomain.com/webhook/telegram',
-    'allowed_ips' => [
-        '149.154.160.0/20',
-        '91.108.4.0/22',
-        // ... Telegram服务器IP段
+    // Bot基本配置
+    'bot_token' => env('TELEGRAM_BOT_TOKEN', ''),
+    'bot_username' => env('TELEGRAM_BOT_USERNAME', ''),
+    'api_url' => 'https://api.telegram.org/bot',
+    'timeout' => 30,
+    
+    // Webhook配置
+    'webhook_url' => env('TELEGRAM_WEBHOOK_URL', ''),
+    'webhook_secret_token' => env('TELEGRAM_WEBHOOK_SECRET', ''),
+    
+    // 业务配置
+    'withdraw' => [
+        'min_amount' => 10.00,
+        'max_amount' => 10000.00,
+    ],
+    
+    // 外部链接
+    'links' => [
+        'game_url' => env('GAME_ENTRANCE_URL', ''),
+        'customer_service_url' => env('CUSTOMER_SERVICE_URL', ''),
     ],
 ];
 ```
 
-## 📝 API接口
+### 监控配置 (config/monitor_config.php)
+```php
+return [
+    'enabled' => true,
+    'check_interval' => 60,     // 检查间隔（秒）
+    'overlap_time' => 10,       // 时间重叠（秒）
+    
+    // 通知规则
+    'notify_rules' => [
+        'recharge' => [
+            'enabled' => true,
+            'template' => 'recharge_notify'
+        ],
+        'withdraw' => [
+            'enabled' => true,
+            'template' => 'withdraw_notify'
+        ],
+        'redpacket' => [
+            'enabled' => true,
+            'template' => 'redpacket_notify'
+        ],
+        'advertisement' => [
+            'enabled' => true,
+            'template' => 'advertisement_notify'
+        ]
+    ]
+];
+```
 
-### Webhook接口
-- **POST** `/webhook/telegram` - 接收Telegram更新
-- **POST** `/api/payment/notify` - 支付回调通知
+## 🚀 部署说明
 
-### 管理后台API
-- **GET** `/admin/telegram/groups` - 获取群组列表
-- **POST** `/admin/telegram/broadcast` - 发送广播消息
-- **GET** `/admin/users` - 获取用户列表
-- **POST** `/admin/users/status` - 修改用户状态
+### 1. 环境要求
+- PHP 8.2+
+- MySQL 5.7+
+- Redis 6.0+
+- Nginx/Apache
+- SSL 证书（Telegram Webhook 需要 HTTPS）
 
-## 🔍 监控与日志
+### 2. 安装步骤
+
+```bash
+# 1. 克隆项目
+git clone [项目地址]
+cd [项目目录]
+
+# 2. 安装依赖
+composer install
+
+# 3. 配置环境
+cp .env.example .env
+# 编辑 .env 文件配置数据库等信息
+
+# 4. 创建数据库表
+php think migrate:run
+
+# 5. 设置目录权限
+chmod -R 755 runtime/
+chmod -R 755 public/
+
+# 6. 配置 Web 服务器指向 public 目录
+```
+
+### 3. Telegram Webhook 设置
+```bash
+# 设置 Webhook
+curl -X POST "https://api.telegram.org/bot[BOT_TOKEN]/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url":"https://yourdomain.com/webhook/telegram",
+    "secret_token":"your_secret_token",
+    "allowed_updates":["message","callback_query","my_chat_member"]
+  }'
+
+# 检查 Webhook 状态
+curl "https://api.telegram.org/bot[BOT_TOKEN]/getWebhookInfo"
+```
+
+## 🔄 监控系统运行
+
+### 启动监控服务
+```bash
+# 手动运行监控检查
+php think monitor:check
+
+# 设置定时任务（推荐）
+# 在 crontab 中添加：
+* * * * * cd /path/to/project && php think monitor:check >> /dev/null 2>&1
+```
+
+### 监控流程说明
+1. **定时检查**: 每分钟检查一次数据库表变化
+2. **数据过滤**: 根据上次检查时间过滤新记录
+3. **模板渲染**: 使用对应模板渲染通知消息
+4. **群组发送**: 根据通知类型发送到对应群组
+5. **日志记录**: 记录发送结果和错误信息
+6. **状态更新**: 更新检查时间和缓存状态
+
+## 📊 监控指标
+
+### 发送统计
+- 总发送数量
+- 成功发送数量  
+- 失败发送数量
+- 发送成功率
+
+### 性能指标
+- 消息发送响应时间
+- 数据库查询耗时
+- 内存使用情况
+- 错误发生频率
+
+## 🔍 日志系统
 
 ### 日志分类
-- **业务日志**: `runtime/log/business/` - 重要业务操作
-- **调试日志**: `runtime/log/debug/` - 开发调试信息
-- **错误日志**: `runtime/log/` - 系统错误信息
-- **Telegram日志**: 专门的Telegram操作日志
+- **Telegram 日志**: `runtime/telegram/` - Telegram 相关操作
+- **监控日志**: `runtime/monitor/` - 监控系统日志
+- **业务日志**: `runtime/business/` - 业务操作日志
+- **错误日志**: `runtime/log/` - 系统错误日志
 
-### 监控指标
-- 消息发送成功率
-- API响应时间
-- 用户活跃度
-- 系统资源使用率
+### 日志格式
+```
+[2025-06-17 10:30:45] 消息内容
+[2025-06-17 10:30:45] ✅ 成功操作
+[2025-06-17 10:30:45] ❌ 错误操作
+[2025-06-17 10:30:45] 🔄 处理中操作
+```
 
 ## 🛠️ 开发规范
 
 ### 代码规范
-- 遵循PSR-4自动加载标准
-- 使用PHPDoc注释
-- 异常处理机制
-- 统一的返回格式
+- 遵循 PSR-4 自动加载标准
+- 使用 PHP 8.2 新特性（类型声明、枚举等）
+- 统一异常处理机制
+- 完善的 PHPDoc 注释
 
 ### 安全规范
 - 所有用户输入必须验证
+- Webhook 请求验证
+- IP 白名单限制
 - 敏感信息加密存储
-- API接口签名验证
-- SQL注入防护
 
-### 性能优化
-- 数据库查询优化
-- Redis缓存使用
-- 消息队列异步处理
-- 静态资源CDN
+### 数据库规范
+- 统一使用 datetime 时间格式
+- 表名使用 `ntp_` 前缀
+- 字段命名采用下划线风格
+- 必须有创建和更新时间字段
 
 ## 🚨 常见问题
 
-### 1. Webhook不能正常接收
-- 检查服务器是否支持HTTPS
-- 验证IP白名单配置
-- 确认Webhook URL可访问
+### 1. Webhook 接收失败
+**排查步骤**:
+- 检查 SSL 证书是否有效
+- 验证服务器是否可外网访问
+- 检查 Webhook URL 配置
+- 查看日志 `runtime/telegram/telegram_debug.log`
 
-### 2. Redis连接失败
-- 检查Redis服务状态
-- 验证连接配置信息
-- 确认防火墙设置
+### 2. 监控通知不发送
+**排查步骤**:
+- 检查监控服务是否运行
+- 验证数据库连接
+- 查看监控配置是否正确
+- 检查 Bot Token 是否有效
 
 ### 3. 数据库连接异常
-- 检查数据库服务状态
-- 验证用户名密码
-- 确认数据库存在
+**排查步骤**:
+- 检查 MySQL 服务状态
+- 验证数据库配置信息
+- 确认数据库用户权限
+- 检查防火墙设置
 
-### 4. 消息发送失败
-- 检查Bot Token有效性
-- 验证用户权限
-- 确认消息格式正确
+### 4. Redis 连接失败
+**排查步骤**:
+- 检查 Redis 服务状态
+- 验证 Redis 配置信息
+- 确认 Redis 密码设置
+- 检查网络连接
+
+## 📈 性能优化建议
+
+### 数据库优化
+- 为监控表的时间字段建立索引
+- 定期清理过期的消息日志
+- 使用数据库连接池
+- 优化查询语句
+
+### 缓存优化
+- 使用 Redis 缓存频繁查询的数据
+- 缓存 Telegram 群组信息
+- 缓存消息模板内容
+- 设置合理的缓存过期时间
+
+### 系统优化
+- 使用队列处理批量消息发送
+- 实现消息发送失败重试机制
+- 监控系统资源使用情况
+- 定时清理临时文件和日志
 
 ## 📞 技术支持
 
-如遇到技术问题，请提供以下信息：
+### 错误报告
+提交问题时请包含以下信息：
 - 错误日志内容
-- 系统环境信息
+- 系统环境信息（PHP/MySQL/Redis 版本）
 - 问题复现步骤
 - 预期行为描述
 
+### 联系方式
+- **技术文档**: 参考本文档
+- **日志查看**: 检查 `runtime/` 目录下的相关日志
+- **配置检查**: 验证 `.env` 和 `config/` 目录下的配置文件
+
 ---
 
-**版本**: v1.0.0  
+**项目版本**: v2.0.0  
+**适用环境**: ThinkPHP 8 + PHP 8.2 + MySQL 5.7  
 **更新时间**: 2025-06-17  
-**维护状态**: 积极维护中
+**维护状态**: 客户端版本，专注 Telegram 交互和监控通知
