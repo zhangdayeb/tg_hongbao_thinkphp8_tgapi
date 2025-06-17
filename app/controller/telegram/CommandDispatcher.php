@@ -7,9 +7,19 @@ use app\controller\BaseTelegramController;
 use app\service\UserService;
 use app\service\TelegramService;
 use app\model\User;
+use app\controller\telegram\GeneralController;
+use app\controller\telegram\PaymentController;
+use app\controller\telegram\WithdrawController;
+use app\controller\telegram\InviteController;
+use app\controller\telegram\GameController;
+use app\controller\telegram\ServiceController;
+use app\controller\telegram\ProfileController;
+use app\controller\telegram\RedPacketController;
+use think\facade\Log;
 
 /**
- * Telegram命令分发器 - 极简版：纯路由分发，业务逻辑交给对应控制器
+ * Telegram 命令调度器 - 修复红包系统版本
+ * 负责分发所有 Telegram 命令和回调到对应的控制器
  */
 class CommandDispatcher extends BaseTelegramController
 {
@@ -23,34 +33,24 @@ class CommandDispatcher extends BaseTelegramController
         $this->telegramService = new TelegramService();
     }
     
-    // =================== 🆕 新增：my_chat_member事件路由 ===================
+    // =================== 主要处理方法 ===================
     
     /**
-     * 🆕 处理机器人状态变化事件（纯路由）
+     * 处理命令
      */
-    public function handleMyChatMember(array $update, string $debugFile): void
+    public function handleCommand(array $update, string $debugFile): void
     {
         try {
-            $this->log($debugFile, "🤖 机器人状态变化事件 -> TelegramService");
-            $this->telegramService->handleMyChatMemberUpdate($update['my_chat_member'], $debugFile);
-        } catch (\Exception $e) {
-            $this->handleException($e, "机器人状态变化", $debugFile);
-        }
-    }
-    
-    // =================== 核心分发方法 ===================
-    
-    /**
-     * 处理文本消息
-     */
-    public function handleMessage(array $update, string $debugFile): void
-    {
-        try {
-            $message = $update['message'];
-            $chatId = intval($message['chat']['id']);
-            $text = $message['text'] ?? '';
+            $message = $update['message'] ?? [];
+            $text = trim($message['text'] ?? '');
+            $chatId = (int)($message['chat']['id'] ?? 0);
             
-            $this->log($debugFile, "收到消息: ChatID={$chatId}, 内容={$text}");
+            if (empty($text) || $chatId === 0) {
+                $this->log($debugFile, "❌ 命令数据不完整");
+                return;
+            }
+            
+            $this->log($debugFile, "收到命令: ChatID={$chatId}, 内容={$text}");
             
             // 确保用户存在
             $user = $this->ensureUserExists($update, $debugFile);
@@ -59,27 +59,23 @@ class CommandDispatcher extends BaseTelegramController
                 return;
             }
             
-            // 分发处理
-            if (strpos($text, '/') === 0) {
-                $this->dispatchCommand($text, $chatId, $user, $debugFile);
-            } else {
-                $this->dispatchTextInput($chatId, $text, $user, $debugFile);
-            }
+            // 分发命令
+            $this->dispatchCommand($text, $chatId, $user, $debugFile);
             
         } catch (\Exception $e) {
-            $this->handleException($e, "处理消息", $debugFile);
+            $this->handleException($e, "处理命令", $debugFile);
         }
     }
     
     /**
      * 处理回调查询
      */
-    public function handleCallback(array $update, string $debugFile): void
+    public function handleCallbackQuery(array $update, string $debugFile): void
     {
         try {
-            $callbackQuery = $update['callback_query'];
-            $chatId = intval($callbackQuery['message']['chat']['id']);
-            $callbackData = $callbackQuery['data'] ?? '';
+            $callbackQuery = $update['callback_query'] ?? [];
+            $callbackData = trim($callbackQuery['data'] ?? '');
+            $chatId = (int)($callbackQuery['message']['chat']['id'] ?? 0);
             $queryId = $callbackQuery['id'] ?? '';
             
             $this->log($debugFile, "收到回调: ChatID={$chatId}, 数据={$callbackData}");
@@ -102,17 +98,49 @@ class CommandDispatcher extends BaseTelegramController
         }
     }
     
-    // =================== 分发逻辑 ===================
+    /**
+     * 处理普通文本消息
+     */
+    public function handleTextMessage(array $update, string $debugFile): void
+    {
+        try {
+            $message = $update['message'] ?? [];
+            $text = trim($message['text'] ?? '');
+            $chatId = (int)($message['chat']['id'] ?? 0);
+            
+            if (empty($text) || $chatId === 0) {
+                $this->log($debugFile, "❌ 文本消息数据不完整");
+                return;
+            }
+            
+            $this->log($debugFile, "收到文本: ChatID={$chatId}, 内容={$text}");
+            
+            // 确保用户存在
+            $user = $this->ensureUserExists($update, $debugFile);
+            if (!$user) {
+                $this->log($debugFile, "❌ 用户处理失败");
+                return;
+            }
+            
+            // 分发文本输入
+            $this->dispatchTextInput($chatId, $text, $user, $debugFile);
+            
+        } catch (\Exception $e) {
+            $this->handleException($e, "处理文本消息", $debugFile);
+        }
+    }
+    
+    // =================== 分发逻辑（修复版本） ===================
     
     /**
-     * 分发命令（简化版）
+     * 分发命令
      */
     private function dispatchCommand(string $text, int $chatId, User $user, string $debugFile): void
     {
         $command = $this->parseCommand($text);
         $controllerClass = $this->getCommandController($command);
         
-        $this->log($debugFile, "命令分发: {$command} -> {$controllerClass}");
+        $this->log($debugFile, "命令分发: {$command} -> " . ($controllerClass ?: 'null'));
         
         if ($controllerClass) {
             $this->forwardToController($controllerClass, 'handle', [
@@ -124,13 +152,13 @@ class CommandDispatcher extends BaseTelegramController
     }
     
     /**
-     * 分发回调（简化版）
+     * 分发回调
      */
     private function dispatchCallback(string $callbackData, int $chatId, User $user, string $debugFile): void
     {
         $controllerClass = $this->getCallbackController($callbackData);
         
-        $this->log($debugFile, "回调分发: {$callbackData} -> {$controllerClass}");
+        $this->log($debugFile, "回调分发: {$callbackData} -> " . ($controllerClass ?: 'null'));
         
         if ($controllerClass) {
             $this->forwardToController($controllerClass, 'handleCallback', [
@@ -142,7 +170,7 @@ class CommandDispatcher extends BaseTelegramController
     }
     
     /**
-     * 分发文本输入（简化版）
+     * 🔧 修复：分发文本输入
      */
     private function dispatchTextInput(int $chatId, string $text, User $user, string $debugFile): void
     {
@@ -151,25 +179,38 @@ class CommandDispatcher extends BaseTelegramController
         
         $this->log($debugFile, "文本输入: 状态={$currentState}, 内容={$text}");
         
+        // 🔧 修复1：红包命令优先处理（不受用户状态影响）
+        if ($this->isRedPacketCommand($text)) {
+            $this->log($debugFile, "✅ 检测到红包命令，优先处理");
+            $this->forwardToController(RedPacketController::class, 'handle', [
+                $this->parseCommand($text), $chatId, $debugFile, $text
+            ], $user, $debugFile);
+            return;
+        }
+        
+        // 🔧 修复2：系统命令优先处理
+        if ($this->isSystemCommand($text)) {
+            $command = $this->parseCommand($text);
+            $this->log($debugFile, "✅ 检测到系统命令: {$command}，优先处理");
+            $this->dispatchCommand($text, $chatId, $user, $debugFile);
+            return;
+        }
+        
+        // 🔧 修复3：处理用户状态相关输入
         $controllerClass = $this->getStateController($currentState);
         
         if ($controllerClass) {
+            $this->log($debugFile, "✅ 状态处理: {$currentState} -> {$controllerClass}");
             $this->forwardToController($controllerClass, 'handleTextInput', [
                 $chatId, $text, $debugFile
             ], $user, $debugFile);
         } else {
-            // 空闲状态，检查是否是红包命令
-            if ($this->isRedPacketCommand($text)) {
-                $this->forwardToController(RedPacketController::class, 'handle', [
-                    $this->parseCommand($text), $chatId, $debugFile, $text
-                ], $user, $debugFile);
-            } else {
-                $this->sendMessage($chatId, "❓ 需要帮助？请使用 /help", $debugFile);
-            }
+            // 🔧 修复4：空闲状态的智能处理
+            $this->handleIdleStateInput($chatId, $text, $user, $debugFile);
         }
     }
     
-    // =================== 控制器映射（简化） ===================
+    // =================== 控制器映射（修复版本） ===================
     
     /**
      * 获取命令对应的控制器
@@ -186,6 +227,7 @@ class CommandDispatcher extends BaseTelegramController
             'invite' => InviteController::class,
             'game' => GameController::class,
             'service' => ServiceController::class,
+            // 🔧 修复：完善红包命令映射
             'redpacket' => RedPacketController::class,
             'red' => RedPacketController::class,
             'hongbao' => RedPacketController::class,
@@ -196,51 +238,42 @@ class CommandDispatcher extends BaseTelegramController
     }
     
     /**
-     * 获取回调对应的控制器（模式匹配）
+     * 🔧 修复：获取回调对应的控制器
      */
     private function getCallbackController(string $callbackData): ?string
     {
-        // 红包相关回调
-        if (str_starts_with($callbackData, 'redpacket') || 
-            str_starts_with($callbackData, 'grab_redpacket') || 
-            str_starts_with($callbackData, 'refresh_redpacket') ||
-            str_starts_with($callbackData, 'send_red_packet') ||
-            str_starts_with($callbackData, 'confirm_send_redpacket') ||
-            str_starts_with($callbackData, 'cancel_send_redpacket') ||
-            str_starts_with($callbackData, 'red_packet_history')) {
-            return RedPacketController::class;
+        // 红包相关回调 - 精确匹配
+        $redPacketPatterns = [
+            '/^(redpacket|grab_redpacket|refresh_redpacket|send_red_packet|confirm_send_redpacket|cancel_send_redpacket|red_packet_history|redpacket_detail)/',
+            '/^(red_|hb_|hongbao_)/',
+        ];
+        
+        foreach ($redPacketPatterns as $pattern) {
+            if (preg_match($pattern, $callbackData)) {
+                return RedPacketController::class;
+            }
         }
         
         // 充值相关回调
-        if (str_starts_with($callbackData, 'recharge') || 
-            str_starts_with($callbackData, 'quick_amount') ||
-            str_starts_with($callbackData, 'confirm_amount') ||
-            str_starts_with($callbackData, 'copy_') ||
-            str_starts_with($callbackData, 'transfer_complete') ||
-            str_starts_with($callbackData, 'manual_amount') ||
-            str_starts_with($callbackData, 'reenter_amount')) {
-            return PaymentController::class;
+        $rechargePatterns = [
+            '/^(recharge|quick_amount|confirm_amount|copy_|transfer_complete|manual_amount|reenter_amount)/',
+        ];
+        
+        foreach ($rechargePatterns as $pattern) {
+            if (preg_match($pattern, $callbackData)) {
+                return PaymentController::class;
+            }
         }
         
         // 提现相关回调
-        if (str_starts_with($callbackData, 'withdraw') ||
-            str_starts_with($callbackData, 'start_withdraw') ||
-            str_starts_with($callbackData, 'set_withdraw_password') ||
-            str_starts_with($callbackData, 'bind_usdt_address') ||
-            str_starts_with($callbackData, 'confirm_withdraw') ||
-            str_starts_with($callbackData, 'cancel_withdraw') ||
-            str_starts_with($callbackData, 'modify_address')) {
-            return WithdrawController::class;
-        }
+        $withdrawPatterns = [
+            '/^(withdraw|start_withdraw|set_withdraw_password|bind_usdt_address|confirm_withdraw)/',
+        ];
         
-        // 个人中心相关回调
-        if (str_starts_with($callbackData, 'profile') ||
-            str_starts_with($callbackData, 'bind_game_id') ||
-            str_starts_with($callbackData, 'start_bind_game_id') ||
-            str_starts_with($callbackData, 'cancel_bind_game_id') ||
-            str_starts_with($callbackData, 'view_current_game_id') ||
-            str_starts_with($callbackData, 'confirm_game_id')) {
-            return ProfileController::class;
+        foreach ($withdrawPatterns as $pattern) {
+            if (preg_match($pattern, $callbackData)) {
+                return WithdrawController::class;
+            }
         }
         
         // 邀请相关回调
@@ -253,101 +286,190 @@ class CommandDispatcher extends BaseTelegramController
             return GameController::class;
         }
         
-        // 客服相关回调
-        if (str_starts_with($callbackData, 'service')) {
-            return ServiceController::class;
+        // 通用回调
+        $generalCallbacks = ['back_to_main', 'main_menu', 'help', 'balance', 'profile'];
+        if (in_array($callbackData, $generalCallbacks)) {
+            return GeneralController::class;
         }
         
-        // 通用回调 - 默认返回GeneralController
-        return GeneralController::class;
+        return null;
     }
     
     /**
-     * 获取状态对应的控制器
+     * 🔧 修复：完善状态控制器映射
      */
     private function getStateController(string $state): ?string
     {
-        // 充值相关状态
-        if (str_contains($state, 'recharge') || str_contains($state, 'amount') || str_contains($state, 'payment')) {
-            return PaymentController::class;
-        }
+        $stateMap = [
+            // 充值相关状态
+            'waiting_recharge_amount' => PaymentController::class,
+            'waiting_payment' => PaymentController::class,
+            'waiting_transfer_proof' => PaymentController::class,
+            
+            // 提现相关状态
+            'setting_withdraw_password' => WithdrawController::class,
+            'confirming_withdraw_password' => WithdrawController::class,
+            'binding_usdt_address' => WithdrawController::class,
+            'waiting_withdraw_amount' => WithdrawController::class,
+            'confirming_withdraw' => WithdrawController::class,
+            
+            // 🔧 修复：红包相关状态
+            'sending_redpacket' => RedPacketController::class,
+            'waiting_redpacket_amount' => RedPacketController::class,
+            'waiting_redpacket_count' => RedPacketController::class,
+            'waiting_redpacket_title' => RedPacketController::class,
+            'confirming_redpacket' => RedPacketController::class,
+            
+            // 其他状态
+            'idle' => null,
+        ];
         
-        // 提现相关状态
-        if (str_contains($state, 'withdraw')) {
-            return WithdrawController::class;
-        }
-        
-        // 红包相关状态
-        if (str_contains($state, 'red_packet') || str_contains($state, 'redpacket')) {
-            return RedPacketController::class;
-        }
-        
-        // 游戏ID相关状态
-        if (str_contains($state, 'game_id')) {
-            return ProfileController::class;
-        }
-        
-        return null; // 空闲状态
+        return $stateMap[$state] ?? null;
     }
     
-    // =================== 工具方法 ===================
+    // =================== 辅助方法（新增和修复） ===================
     
     /**
-     * 统一转发到控制器（消除重复代码）
+     * 🆕 检查是否是系统命令
      */
-    private function forwardToController(string $controllerClass, string $method, array $params, User $user, string $debugFile): void
+    private function isSystemCommand(string $text): bool
     {
-        try {
-            if (!class_exists($controllerClass)) {
-                $this->log($debugFile, "❌ 控制器不存在: {$controllerClass}");
-                return;
+        $systemCommands = ['/start', '/help', '/menu', '/balance', '/profile'];
+        $command = $this->parseCommand($text);
+        
+        foreach ($systemCommands as $sysCmd) {
+            if (strtolower($command) === substr($sysCmd, 1)) {
+                return true;
             }
-            
-            $controller = new $controllerClass();
-            
-            // 传递用户对象
-            if (method_exists($controller, 'setUser')) {
-                $controller->setUser($user);
-            }
-            
-            // 调用方法
-            if (method_exists($controller, $method)) {
-                call_user_func_array([$controller, $method], $params);
-                $this->log($debugFile, "✅ 控制器调用成功: {$controllerClass}::{$method}");
-            } else {
-                $this->log($debugFile, "❌ 方法不存在: {$controllerClass}::{$method}");
-            }
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 控制器调用失败: " . $e->getMessage());
-            $this->sendMessage($params[1] ?? 0, "❌ 操作失败，请稍后重试", $debugFile);
         }
+        
+        return false;
     }
     
     /**
-     * 确保用户存在（简化版）
+     * 🔧 修复：增强红包命令识别
+     */
+    private function isRedPacketCommand(string $text): bool
+    {
+        $redPacketCommands = ['/red', '/hongbao', '/hb', 'red', 'hongbao', 'hb'];
+        $text = trim($text);
+        
+        // 检查完整命令格式
+        foreach ($redPacketCommands as $cmd) {
+            if (stripos($text, $cmd) === 0) {
+                // 进一步验证是否是有效的红包命令格式
+                if ($this->validateRedPacketCommandFormat($text)) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 🆕 验证红包命令格式
+     */
+    private function validateRedPacketCommandFormat(string $text): bool
+    {
+        // 基础命令检查
+        $basicPattern = '/^\/?(red|hongbao|hb)(\s|$)/i';
+        if (!preg_match($basicPattern, $text)) {
+            return false;
+        }
+        
+        // 如果只是命令本身（没有参数），也认为是有效的红包命令
+        $parts = preg_split('/\s+/', trim($text), -1, PREG_SPLIT_NO_EMPTY);
+        if (count($parts) === 1) {
+            return true; // 只有命令，显示红包菜单
+        }
+        
+        // 如果有参数，验证基本格式
+        if (count($parts) >= 3) {
+            $amount = $parts[1] ?? '';
+            $count = $parts[2] ?? '';
+            
+            return is_numeric($amount) && ctype_digit($count);
+        }
+        
+        return true; // 参数不完整但也算红包相关
+    }
+    
+    /**
+     * 🆕 处理空闲状态的输入
+     */
+    private function handleIdleStateInput(int $chatId, string $text, User $user, string $debugFile): void
+    {
+        $this->log($debugFile, "处理空闲状态输入: {$text}");
+        
+        // 尝试解析为命令
+        if (strpos($text, '/') === 0) {
+            $this->dispatchCommand($text, $chatId, $user, $debugFile);
+            return;
+        }
+        
+        // 检查是否是数字（可能是金额输入）
+        if (is_numeric($text)) {
+            $this->sendMessage($chatId, "💡 请先选择要进行的操作（充值/提现/发红包），然后输入金额", $debugFile);
+            return;
+        }
+        
+        // 其他情况提供帮助
+        $this->sendMessage($chatId, "❓ 需要帮助？请使用 /help 查看可用命令\n\n🧧 发红包：/red <金额> <个数> [标题]", $debugFile);
+    }
+    
+    // =================== 用户管理 ===================
+    
+    /**
+     * 确保用户存在
      */
     private function ensureUserExists(array $update, string $debugFile): ?User
     {
         try {
-            $telegramData = $this->extractTelegramUserData($update);
-            if (!$telegramData) {
+            $telegramUserData = $this->extractTelegramUserData($update);
+            if (!$telegramUserData) {
+                $this->log($debugFile, "❌ 无法提取Telegram用户数据");
                 return null;
             }
             
-            // 解析邀请码（仅限start命令）
-            $invitationCode = '';
-            if (isset($update['message']['text'])) {
-                $invitationCode = $this->extractInvitationCode($update['message']['text']) ?? '';
+            // 从 /start 命令中提取邀请码
+            $inviteCode = '';
+            $text = $update['message']['text'] ?? $update['callback_query']['message']['text'] ?? '';
+            if (!empty($text)) {
+                $inviteCode = $this->extractInvitationCode($text) ?: '';
             }
             
-            return $this->userService->findOrCreateUser($telegramData, $invitationCode);
+            return $this->userService->findOrCreateUser($telegramUserData, $inviteCode);
             
         } catch (\Exception $e) {
             $this->log($debugFile, "❌ 用户处理异常: " . $e->getMessage());
             return null;
         }
     }
+    
+    /**
+     * 转发到控制器
+     */
+    private function forwardToController(string $controllerClass, string $method, array $params, User $user, string $debugFile): void
+    {
+        try {
+            $controller = new $controllerClass();
+            
+            // 设置用户
+            if (method_exists($controller, 'setUser')) {
+                $controller->setUser($user);
+            }
+            
+            // 调用方法
+            call_user_func_array([$controller, $method], $params);
+            
+        } catch (\Exception $e) {
+            $this->log($debugFile, "❌ 控制器转发失败: " . $e->getMessage());
+            $this->handleException($e, "控制器转发", $debugFile);
+        }
+    }
+    
+    // =================== 工具方法 ===================
     
     /**
      * 提取Telegram用户数据
@@ -407,20 +529,17 @@ class CommandDispatcher extends BaseTelegramController
     }
     
     /**
-     * 检查是否是红包命令
+     * 安全回答回调查询
      */
-    private function isRedPacketCommand(string $text): bool
+    private function safeAnswerCallbackQuery(string $queryId, ?string $text, string $debugFile): void
     {
-        $redPacketCommands = ['/red', '/hongbao', '/hb', 'red', 'hongbao', 'hb'];
-        $text = trim($text);
-        
-        foreach ($redPacketCommands as $cmd) {
-            if (stripos($text, $cmd) === 0) {
-                return true;
+        try {
+            if (!empty($queryId)) {
+                $this->telegramService->answerCallbackQuery($queryId, $text);
             }
+        } catch (\Exception $e) {
+            $this->log($debugFile, "❌ 回答回调查询失败: " . $e->getMessage());
         }
-        
-        return false;
     }
     
     /**
@@ -429,23 +548,5 @@ class CommandDispatcher extends BaseTelegramController
     protected function getUserService(): UserService
     {
         return $this->userService;
-    }
-    
-    /**
-     * 处理内联查询（预留）
-     */
-    public function handleInlineQuery(array $update, string $debugFile): void
-    {
-        $this->log($debugFile, "收到内联查询");
-        // 如需要可以实现
-    }
-    
-    /**
-     * 处理未知消息类型（预留）
-     */
-    public function handleUnknown(array $update, string $debugFile): void
-    {
-        $this->log($debugFile, "收到未知类型消息");
-        // 如需要可以实现
     }
 }
