@@ -67,27 +67,7 @@ class RedPacketController extends BaseTelegramController
         }
     }
     
-    /**
-     * 设置当前用户（由CommandDispatcher调用）
-     */
-    public function setUser(User $user): void
-    {
-        try {
-            $this->log('debug', "🔧 设置当前用户: ID={$user->id}, TG_ID={$user->user_id}");
-            
-            $this->currentUser = $user;
-            $this->commandHandler->setUser($user);
-            $this->callbackHandler->setUser($user);
-            $this->messageSender->setUser($user);
-            
-            $this->log('debug', "✅ 用户设置完成");
-            
-        } catch (\Exception $e) {
-            $this->log('error', "❌ 设置用户失败: " . $e->getMessage());
-            throw $e;
-        }
-    }
-    
+   
     /**
      * 设置聊天上下文
      */
@@ -345,13 +325,20 @@ class RedPacketController extends BaseTelegramController
     }
     
     /**
-     * 桥接抢红包方法 - 修复参数类型
+     * 桥接抢红包方法 - 完整修复版本
      */
     public function bridgeGrabRedPacket(string $packetId, int $chatId, string $debugFile): void
     {
         $this->log($debugFile, "🎯 桥接抢红包: {$packetId}");
         
         try {
+            // 🔥 修复：验证用户对象
+            if (!$this->currentUser || !$this->currentUser->id) {
+                $this->log($debugFile, "❌ 当前用户对象无效");
+                $this->bridgeSendMessage($chatId, "❌ 用户状态异常，请重新操作", $debugFile);
+                return;
+            }
+            
             // 🔥 修复：从字符串红包ID获取数据库ID
             $redPacket = \app\model\RedPacket::where('packet_id', $packetId)->find();
             if (!$redPacket) {
@@ -360,27 +347,91 @@ class RedPacketController extends BaseTelegramController
                 return;
             }
             
-            // 🔥 修复：使用数据库自增ID而不是packet_id字符串
+            // 🔥 修复：安全获取用户属性，处理空值
+            $userId = $this->currentUser->id;
+            $userTgId = $this->currentUser->tg_id ?? $this->currentUser->user_id ?? '';
+            $username = $this->currentUser->tg_username ?? $this->currentUser->username ?? '';
+            
+            // 如果用户名为空，使用备选方案
+            if (empty($username)) {
+                // 尝试从其他字段获取显示名称
+                if (!empty($this->currentUser->tg_first_name)) {
+                    $username = $this->currentUser->tg_first_name;
+                    if (!empty($this->currentUser->tg_last_name)) {
+                        $username .= ' ' . $this->currentUser->tg_last_name;
+                    }
+                } else if (!empty($this->currentUser->user_name)) {
+                    $username = $this->currentUser->user_name;
+                } else {
+                    $username = "用户{$userId}"; // 最终兜底
+                }
+            }
+            
+            // 确保tgId不为空
+            if (empty($userTgId)) {
+                $this->log($debugFile, "❌ 用户TG_ID为空，无法进行抢红包操作");
+                $this->bridgeSendMessage($chatId, "❌ 用户信息不完整，请重新进入", $debugFile);
+                return;
+            }
+            
+            $this->log($debugFile, "用户信息验证完成 - ID: {$userId}, TG_ID: {$userTgId}, 显示名: '{$username}'");
+            
+            // 🔥 修复：确保所有参数类型正确
             $result = $this->redPacketService->grabRedPacket(
-                $redPacket->id,  // 使用int类型的数据库ID
-                $this->currentUser->id,
-                $this->currentUser->tg_id,
-                $this->currentUser->username
+                (int)$redPacket->id,        // int: 数据库红包ID
+                (int)$userId,               // int: 用户ID  
+                (string)$userTgId,          // string: Telegram用户ID
+                (string)$username           // string: 用户显示名称（确保非空）
             );
+            
+            $this->log($debugFile, "抢红包服务调用完成，结果: " . json_encode($result));
             
             if ($result['success']) {
                 // 抢红包成功
                 $this->sendGrabSuccessMessage($chatId, $result['data'], $debugFile);
+                $this->log($debugFile, "✅ 抢红包成功处理完成");
             } else {
                 // 抢红包失败
                 $this->bridgeSendMessage($chatId, $result['msg'], $debugFile);
+                $this->log($debugFile, "⚠️ 抢红包失败: " . $result['msg']);
             }
             
         } catch (\Exception $e) {
             $this->log($debugFile, "❌ 抢红包异常: " . $e->getMessage());
+            $this->log($debugFile, "异常堆栈: " . $e->getTraceAsString());
             $this->bridgeSendMessage($chatId, "❌ 系统异常，请稍后重试", $debugFile);
         }
     }
+    
+    /**
+     * 设置当前用户（由CommandDispatcher调用）- 增强调试版本
+     */
+    public function setUser(User $user): void
+    {
+        try {
+            // 详细记录用户设置过程
+            $this->log('debug', "🔧 设置当前用户开始");
+            $this->log('debug', "用户基本信息 - ID: {$user->id}");
+            $this->log('debug', "用户TG信息 - tg_id: " . ($user->tg_id ?? 'null'));
+            $this->log('debug', "用户TG信息 - user_id: " . ($user->user_id ?? 'null')); 
+            $this->log('debug', "用户名信息 - tg_username: " . ($user->tg_username ?? 'null'));
+            $this->log('debug', "用户名信息 - username: " . ($user->username ?? 'null'));
+            $this->log('debug', "用户名信息 - tg_first_name: " . ($user->tg_first_name ?? 'null'));
+            $this->log('debug', "用户名信息 - user_name: " . ($user->user_name ?? 'null'));
+            
+            $this->currentUser = $user;
+            $this->commandHandler->setUser($user);
+            $this->callbackHandler->setUser($user);
+            $this->messageSender->setUser($user);
+            
+            $this->log('debug', "✅ 用户设置完成");
+            
+        } catch (\Exception $e) {
+            $this->log('error', "❌ 设置用户失败: " . $e->getMessage());
+            throw $e;
+        }
+    }
+
     /**
      * 发送抢红包成功消息
      */
