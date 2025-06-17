@@ -270,9 +270,9 @@ class RedPacketMessageSender extends BaseTelegramController
     // =================== 内部方法（重试机制）===================
     
     /**
-     * 带重试机制的消息发送
+     * 带重试机制的消息发送 - 简化版本
      */
-    private function sendWithRetry(int $chatId, string $message, ?array $keyboard, string $debugFile): ?array
+    private function sendWithRetry(int $chatId, string $message, ?array $keyboard, string $debugFile): bool
     {
         $attempt = 0;
         $lastError = null;
@@ -290,10 +290,10 @@ class RedPacketMessageSender extends BaseTelegramController
                 
                 if ($result) {
                     $this->log($debugFile, "✅ 消息发送成功");
-                    return $result;
+                    return true;
                 }
                 
-                throw new \Exception("发送失败：无返回结果");
+                throw new \Exception("发送失败：返回 false");
                 
             } catch (\Exception $e) {
                 $lastError = $e->getMessage();
@@ -317,7 +317,7 @@ class RedPacketMessageSender extends BaseTelegramController
         // 重置重试延迟
         $this->retryDelay = 1;
         
-        return null;
+        return false;
     }
     
     /**
