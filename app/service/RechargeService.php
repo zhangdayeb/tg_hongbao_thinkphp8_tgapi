@@ -26,12 +26,6 @@ class RechargeService
     const METHOD_HUIWANG = 'huiwang';
     const METHOD_USDT = 'usdt';
     
-    private TelegramBroadcastService $telegramBroadcastService;
-    
-    public function __construct()
-    {
-        $this->telegramBroadcastService = new TelegramBroadcastService();
-    }
     
     // =================== 核心业务方法 ===================
     
