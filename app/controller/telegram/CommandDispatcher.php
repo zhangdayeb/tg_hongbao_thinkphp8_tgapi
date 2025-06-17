@@ -80,7 +80,7 @@ class CommandDispatcher extends BaseTelegramController
             
             $this->log($debugFile, "收到回调: ChatID={$chatId}, 数据={$callbackData}");
             
-            // 回调响应
+            // 回调响应 - 使用父类的方法
             $this->safeAnswerCallbackQuery($queryId, null, $debugFile);
             
             // 确保用户存在
@@ -389,33 +389,52 @@ class CommandDispatcher extends BaseTelegramController
             $amount = $parts[1] ?? '';
             $count = $parts[2] ?? '';
             
-            return is_numeric($amount) && ctype_digit($count);
+            // 验证金额格式（支持小数）
+            if (!preg_match('/^\d+(\.\d+)?$/', $amount)) {
+                return false;
+            }
+            
+            // 验证个数格式（必须是整数）
+            if (!preg_match('/^\d+$/', $count)) {
+                return false;
+            }
+            
+            return true;
         }
         
-        return true; // 参数不完整但也算红包相关
+        return false;
     }
     
     /**
-     * 🆕 处理空闲状态的输入
+     * 🆕 处理空闲状态输入
      */
     private function handleIdleStateInput(int $chatId, string $text, User $user, string $debugFile): void
     {
-        $this->log($debugFile, "处理空闲状态输入: {$text}");
+        // 智能识别用户意图
+        $text = trim($text);
         
-        // 尝试解析为命令
-        if (strpos($text, '/') === 0) {
-            $this->dispatchCommand($text, $chatId, $user, $debugFile);
-            return;
-        }
-        
-        // 检查是否是数字（可能是金额输入）
+        // 数字输入 - 可能是金额
         if (is_numeric($text)) {
-            $this->sendMessage($chatId, "💡 请先选择要进行的操作（充值/提现/发红包），然后输入金额", $debugFile);
+            $this->log($debugFile, "检测到数字输入，可能是充值金额");
+            $this->forwardToController(PaymentController::class, 'handleTextInput', [
+                $chatId, $text, $debugFile
+            ], $user, $debugFile);
             return;
         }
         
-        // 其他情况提供帮助
-        $this->sendMessage($chatId, "❓ 需要帮助？请使用 /help 查看可用命令\n\n🧧 发红包：/red <金额> <个数> [标题]", $debugFile);
+        // 包含USDT地址的输入
+        if (preg_match('/^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$|^0x[a-fA-F0-9]{40}$|^T[A-Za-z1-9]{33}$/', $text)) {
+            $this->log($debugFile, "检测到USDT地址输入");
+            $this->forwardToController(WithdrawController::class, 'handleTextInput', [
+                $chatId, $text, $debugFile
+            ], $user, $debugFile);
+            return;
+        }
+        
+        // 默认处理 - 显示帮助
+        $this->forwardToController(GeneralController::class, 'handleTextInput', [
+            $chatId, $text, $debugFile
+        ], $user, $debugFile);
     }
     
     // =================== 用户管理 ===================
@@ -432,17 +451,10 @@ class CommandDispatcher extends BaseTelegramController
                 return null;
             }
             
-            // 从 /start 命令中提取邀请码
-            $inviteCode = '';
-            $text = $update['message']['text'] ?? $update['callback_query']['message']['text'] ?? '';
-            if (!empty($text)) {
-                $inviteCode = $this->extractInvitationCode($text) ?: '';
-            }
-            
-            return $this->userService->findOrCreateUser($telegramUserData, $inviteCode);
+            return $this->userService->createOrUpdateFromTelegram($telegramUserData, $debugFile);
             
         } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 用户处理异常: " . $e->getMessage());
+            $this->handleException($e, "确保用户存在", $debugFile);
             return null;
         }
     }
@@ -453,15 +465,23 @@ class CommandDispatcher extends BaseTelegramController
     private function forwardToController(string $controllerClass, string $method, array $params, User $user, string $debugFile): void
     {
         try {
+            if (!class_exists($controllerClass)) {
+                throw new \Exception("控制器类不存在: {$controllerClass}");
+            }
+            
             $controller = new $controllerClass();
             
-            // 设置用户
+            // 设置用户（如果控制器支持）
             if (method_exists($controller, 'setUser')) {
                 $controller->setUser($user);
             }
             
             // 调用方法
-            call_user_func_array([$controller, $method], $params);
+            if (method_exists($controller, $method)) {
+                call_user_func_array([$controller, $method], $params);
+            } else {
+                throw new \Exception("方法不存在: {$controllerClass}::{$method}");
+            }
             
         } catch (\Exception $e) {
             $this->log($debugFile, "❌ 控制器转发失败: " . $e->getMessage());
@@ -526,20 +546,6 @@ class CommandDispatcher extends BaseTelegramController
         }
         
         return strtolower($command);
-    }
-    
-    /**
-     * 安全回答回调查询
-     */
-    private function safeAnswerCallbackQuery(string $queryId, ?string $text, string $debugFile): void
-    {
-        try {
-            if (!empty($queryId)) {
-                $this->telegramService->answerCallbackQuery($queryId, $text);
-            }
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 回答回调查询失败: " . $e->getMessage());
-        }
     }
     
     /**
