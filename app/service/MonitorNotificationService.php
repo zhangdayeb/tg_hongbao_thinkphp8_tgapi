@@ -261,10 +261,10 @@ class MonitorNotificationService
                     // 检查有效期
                     $query->where(function($subQuery) use ($currentDate) {
                         $subQuery->whereNull('start_date')
-                                ->orWhere('start_date', '<=', $currentDate);
+                                ->whereOr('start_date', '<=', $currentDate);
                     })->where(function($subQuery) use ($currentDate) {
                         $subQuery->whereNull('end_date')
-                                ->orWhere('end_date', '>=', $currentDate);
+                                ->whereOr('end_date', '>=', $currentDate);
                     });
                 })
                 ->where(function($query) use ($currentTime, $currentTimeOnly) {
@@ -273,25 +273,25 @@ class MonitorNotificationService
                         $subQuery->where('send_mode', 1)
                                 ->where('is_sent', 0) // 未发送过
                                 ->where('send_time', '<=', $currentTime);
-                    })->orWhere(function($subQuery) use ($currentTimeOnly) {
+                    })->whereOr(function($subQuery) use ($currentTimeOnly) {
                         // 模式2：每日定时发送
                         $subQuery->where('send_mode', 2)
                                 ->where(function($innerQuery) use ($currentTimeOnly, $currentTime) {
                                     $innerQuery->where(function($timeQuery) use ($currentTimeOnly) {
                                         // 正常时间匹配
                                         $timeQuery->whereRaw("FIND_IN_SET(?, daily_times)", [$currentTimeOnly]);
-                                    })->orWhere(function($startupQuery) use ($currentTime) {
+                                    })->whereOr(function($startupQuery) use ($currentTime) {
                                         // 🚀 启动时发送：如果从未发送过，立即发送一轮
                                         $startupQuery->whereNull('last_sent_time')
-                                                    ->orWhereRaw("DATE(last_sent_time) < DATE(?)", [$currentTime]);
+                                                    ->whereOrRaw("DATE(last_sent_time) < DATE(?)", [$currentTime]);
                                     });
                                 });
-                    })->orWhere(function($subQuery) use ($currentTime) {
+                    })->whereOr(function($subQuery) use ($currentTime) {
                         // 模式3：循环间隔发送
                         $subQuery->where('send_mode', 3)
                                 ->where(function($innerQuery) use ($currentTime) {
                                     $innerQuery->whereNull('last_sent_time') // 🚀 启动时立即发送
-                                            ->orWhereRaw("TIMESTAMPDIFF(MINUTE, last_sent_time, ?) >= interval_minutes", 
+                                            ->whereOrRaw("TIMESTAMPDIFF(MINUTE, last_sent_time, ?) >= interval_minutes", 
                                                         [$currentTime]);
                                 });
                     });
