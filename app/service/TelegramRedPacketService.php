@@ -552,7 +552,6 @@ class TelegramRedPacketService
     }
     
 
-<?php
 
 // 完整的 grabRedPacket 方法 - TelegramRedPacketService.php
 
