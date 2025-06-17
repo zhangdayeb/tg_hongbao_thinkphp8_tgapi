@@ -552,14 +552,14 @@ class TelegramRedPacketService
     }
     
     /**
-     * 抢红包方法 - 修复 Redis 引用和参数类型定义
+     * 抢红包方法 - 修复字段名和状态判断
      */
     public function grabRedPacket(int $packetId, int $userId, string $userTgId, string $username = ''): array
     {
         $lockKey = "redpacket_grab_{$packetId}_{$userId}";
         
         try {
-            // 🔥 修复：参数验证和预处理
+            // 参数验证和预处理
             if (empty($userTgId)) {
                 return [
                     'success' => false,
@@ -567,7 +567,7 @@ class TelegramRedPacketService
                 ];
             }
             
-            // 🔥 修复：确保用户名不为空
+            // 确保用户名不为空
             if (empty($username)) {
                 $username = "用户{$userId}";
             }
@@ -579,7 +579,7 @@ class TelegramRedPacketService
                 'username' => $username
             ]);
             
-            // 🔥 修复：使用 Cache 而不是 Redis
+            // 使用 Cache 而不是 Redis
             // 检查是否有锁（使用缓存实现分布式锁）
             if (Cache::has($lockKey)) {
                 return [
@@ -599,19 +599,26 @@ class TelegramRedPacketService
                 throw new \Exception('红包不存在或已过期');
             }
             
-            // 检查红包状态
-            if ($redPacket->status !== 'active') {
-                throw new \Exception('红包已结束');
+            // 使用正确的状态常量比较
+            if ($redPacket->status !== \app\model\RedPacket::STATUS_ACTIVE) {
+                $statusTexts = [
+                    \app\model\RedPacket::STATUS_COMPLETED => '红包已被抢完',
+                    \app\model\RedPacket::STATUS_EXPIRED => '红包已过期',
+                    \app\model\RedPacket::STATUS_REVOKED => '红包已被撤回',
+                    \app\model\RedPacket::STATUS_CANCELED => '红包已取消',
+                ];
+                $statusText = $statusTexts[$redPacket->status] ?? '红包已结束';
+                throw new \Exception($statusText);
             }
             
             // 检查是否还有红包可抢
-            if ($redPacket->grabbed_count >= $redPacket->total_count) {
+            if ($redPacket->remain_count <= 0) {
                 throw new \Exception('红包已被抢完');
             }
             
-            // 检查是否已经抢过
+            // 🔥 修复：使用正确的字段名 packet_id 而不是 red_packet_id
             $existingRecord = \app\model\RedPacketRecord::where([
-                'red_packet_id' => $packetId,
+                'packet_id' => $redPacket->packet_id,  // 🔥 修复：使用 packet_id
                 'user_id' => $userId
             ])->find();
             
@@ -647,7 +654,7 @@ class TelegramRedPacketService
                     'amount' => $result['amount'],
                     'grab_order' => $result['grab_order'],
                     'is_best_luck' => $result['is_best_luck'] ?? false,
-                    'remain_count' => $redPacket->total_count - $redPacket->grabbed_count - 1,
+                    'remain_count' => $redPacket->remain_count - 1,
                     'remain_amount' => $redPacket->remain_amount - $result['amount']
                 ]
             ];
