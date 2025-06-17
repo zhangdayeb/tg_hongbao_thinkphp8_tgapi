@@ -295,18 +295,13 @@ class RedPacketController extends BaseTelegramController
             }
             $this->log($debugFile, "✅ 重复检查通过");
             
-            // 🔥 修复：正确传递参数
-            $amount = (float)($parsed['amount'] ?? 0);
-            $count = (int)($parsed['count'] ?? 0);
-            $title = (string)($parsed['title'] ?? '恭喜发财，大吉大利');
-            
             // 创建红包（仅数据库操作，不发送群内消息）
             $this->log($debugFile, "🔄 开始调用 redPacketService->createRedPacket");
             $result = $this->redPacketService->createRedPacket(
                 $this->currentUser,
-                $amount,
-                $count,
-                $title,
+                $parsed['amount'],
+                $parsed['count'],
+                $parsed['title'],
                 $this->chatContext
             );
             $this->log($debugFile, "✅ redPacketService->createRedPacket 调用完成");
@@ -495,8 +490,7 @@ class RedPacketController extends BaseTelegramController
                 $bestText = $isBest ? '👑 手气最佳！' : '';
                 
                 $message = "🎉 恭喜您抢到了 {$amount} USDT 红包！{$bestText}";
-                $userTgId = (int)$this->currentUser->user_id;
-                $this->sendMessage($userTgId, $message, $debugFile);
+                $this->sendMessage($this->currentUser->user_id, $message, $debugFile);
             }
         } catch (\Exception $e) {
             $this->log($debugFile, "发送抢红包通知失败: " . $e->getMessage());
