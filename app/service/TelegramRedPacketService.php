@@ -552,8 +552,8 @@ class TelegramRedPacketService
         Cache::delete($key);
     }
     
-    /**
-     * 抢红包方法 - 修复参数类型定义
+     /**
+     * 抢红包方法 - 修复参数类型定义和空值处理
      */
     public function grabRedPacket(int $packetId, int $userId, string $userTgId, string $username = ''): array
     {
@@ -618,12 +618,12 @@ class TelegramRedPacketService
                 throw new \Exception('红包金额异常');
             }
             
-            // 创建抢红包记录
+            // 创建抢红包记录 - 处理username可能为空的情况
             $grabRecord = new \app\model\RedPacketRecord();
             $grabRecord->packet_id = $packetId;
             $grabRecord->user_id = $userId;
             $grabRecord->user_tg_id = $userTgId;
-            $grabRecord->username = $username;
+            $grabRecord->username = $username ?: '匿名用户';  // 如果username为空，使用默认值
             $grabRecord->amount = $grabAmount;
             $grabRecord->grab_order = $redPacket->total_count - $redPacket->remain_acount + 1;
             $grabRecord->created_at = date('Y-m-d H:i:s');
