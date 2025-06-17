@@ -27,12 +27,12 @@ class WithdrawService
     const MAX_WITHDRAW_AMOUNT = 10000; // 最大提现金额
     
     private TelegramService $telegramService;
-    private TelegramBroadcastService $telegramBroadcastService;
+
     
     public function __construct()
     {
         $this->telegramService = new TelegramService();
-        $this->telegramBroadcastService = new TelegramBroadcastService();
+
     }
     
     // =================== 1. 提现密码管理 ===================
@@ -347,14 +347,6 @@ class WithdrawService
             // 记录资金流水
             $this->createMoneyLog($userId, 2, 201, $oldBalance, $newBalance, $totalAmount, $order->id, "提现申请 - 订单号{$orderNo}（含手续费{$fee}元）");
             
-            // 🔥 删除所有通知相关代码
-            /*
-            // 发送个人提现申请通知
-            $this->telegramService->sendWithdrawApplyNotify($userId, [...]);
-            
-            // 提现申请群组广播
-            $this->telegramBroadcastService->broadcastWithdrawApply([...]);
-            */
             
             Db::commit();
             
