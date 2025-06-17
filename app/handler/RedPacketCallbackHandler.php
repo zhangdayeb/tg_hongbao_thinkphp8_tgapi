@@ -133,9 +133,22 @@ class RedPacketCallbackHandler extends BaseTelegramController
             $packetId = str_replace('grab_redpacket_', '', $callbackData);
             $this->log($debugFile, "🎁 处理抢红包: {$packetId}");
             
-            // 🔥 修复：使用基类的方法立即回应用户操作
+            // 🔥 新增：基于 QueryID 的去重检查
             if ($this->currentCallbackQueryId) {
-                $this->safeAnswerCallbackQuery($this->currentCallbackQueryId, "正在处理中...", $debugFile);
+                $queryKey = "callback_processed_{$this->currentCallbackQueryId}";
+                if (Cache::has($queryKey)) {
+                    $this->log($debugFile, "⚠️ 重复的回调查询，已忽略: {$this->currentCallbackQueryId}");
+                    return;
+                }
+                
+                // 标记该查询已处理，缓存30秒
+                Cache::set($queryKey, true, 30);
+                $this->log($debugFile, "✅ 标记回调查询已处理: {$this->currentCallbackQueryId}");
+            }
+            
+            // 🔥 立即响应用户操作（改进响应时机）
+            if ($this->currentCallbackQueryId) {
+                $this->safeAnswerCallbackQuery($this->currentCallbackQueryId, "正在抢红包...", $debugFile);
             }
             
             // 通过桥接方法抢红包
@@ -148,10 +161,11 @@ class RedPacketCallbackHandler extends BaseTelegramController
             
         } catch (\Exception $e) {
             $this->log($debugFile, "❌ 抢红包处理异常: " . $e->getMessage());
+            
+            // 异常时也要响应回调查询
             if ($this->currentCallbackQueryId) {
                 $this->safeAnswerCallbackQuery($this->currentCallbackQueryId, "❌ 操作失败，请重试", $debugFile);
             }
-            $this->bridgeSendMessage($chatId, "❌ 系统异常，请稍后重试", $debugFile);
         }
     }
     

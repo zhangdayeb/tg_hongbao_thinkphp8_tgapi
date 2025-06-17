@@ -594,10 +594,10 @@ class TelegramRedPacketService
                     Cache::delete($lockKey);
                     Log::info('强制清除过期缓存锁', ['lock_key' => $lockKey]);
                 } else {
-                    return [
-                        'success' => false,
-                        'msg' => "操作过于频繁，请等待 " . (15 - $cacheTime) . " 秒后重试"
-                    ];
+                    // return [
+                    //     'success' => false,
+                    //     'msg' => "操作过于频繁，请等待 " . (15 - $cacheTime) . " 秒后重试"
+                    // ];
                 }
             }
             
