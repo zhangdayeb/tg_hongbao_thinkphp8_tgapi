@@ -108,19 +108,49 @@ class RedPacketCallbackHandler extends BaseTelegramController
     }
     
     /**
-     * 处理抢红包回调
+     * 处理抢红包回调 - 增加错误处理和用户反馈
      */
     private function handleGrabRedPacket(string $callbackData, int $chatId, string $debugFile): void
     {
-        $packetId = str_replace('grab_redpacket_', '', $callbackData);
-        $this->log($debugFile, "🎁 处理抢红包: {$packetId}");
-        
-        // 通过桥接方法抢红包
-        if ($this->controllerBridge && method_exists($this->controllerBridge, 'bridgeGrabRedPacket')) {
-            $this->controllerBridge->bridgeGrabRedPacket($packetId, $chatId, $debugFile);
-        } else {
-            $this->log($debugFile, "❌ 控制器桥接不可用");
-            // 对于抢红包失败，不显示错误消息
+        try {
+            $packetId = str_replace('grab_redpacket_', '', $callbackData);
+            $this->log($debugFile, "🎁 处理抢红包: {$packetId}");
+            
+            // 🔥 修复：立即回应用户操作
+            $this->answerCallbackQuery("正在处理中...");
+            
+            // 通过桥接方法抢红包
+            if ($this->controllerBridge && method_exists($this->controllerBridge, 'bridgeGrabRedPacket')) {
+                $this->controllerBridge->bridgeGrabRedPacket($packetId, $chatId, $debugFile);
+            } else {
+                $this->log($debugFile, "❌ 控制器桥接不可用");
+                $this->bridgeSendMessage($chatId, "❌ 系统异常，请稍后重试", $debugFile);
+            }
+            
+        } catch (\Exception $e) {
+            $this->log($debugFile, "❌ 抢红包处理异常: " . $e->getMessage());
+            $this->answerCallbackQuery("❌ 操作失败，请重试");
+            $this->bridgeSendMessage($chatId, "❌ 系统异常，请稍后重试", $debugFile);
+        }
+    }
+    
+    /**
+     * 回应回调查询
+     */
+    private function answerCallbackQuery(string $text = '', bool $showAlert = false): void
+    {
+        try {
+            $data = [
+                'callback_query_id' => $this->callbackQueryId,
+                'text' => $text,
+                'show_alert' => $showAlert
+            ];
+            
+            // 发送回应
+            $this->sendApiRequest('answerCallbackQuery', $data);
+            
+        } catch (\Exception $e) {
+            // 静默处理回应失败
         }
     }
     

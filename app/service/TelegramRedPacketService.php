@@ -553,126 +553,105 @@ class TelegramRedPacketService
     }
     
     /**
-     * 抢红包 - 带并发控制
+     * 抢红包方法 - 修复参数类型定义
      */
-    public function grabRedPacket(int $packetId, User $user): array
+    public function grabRedPacket(int $packetId, int $userId, string $userTgId, string $username = ''): array
     {
-        $lockKey = self::GRAB_LOCK_PREFIX . $packetId . '_' . $user->id;
-        $userLimitKey = self::USER_LIMIT_PREFIX . $user->id;
+        $lockKey = "redpacket_grab_{$packetId}_{$userId}";
         
         try {
-            // 并发控制：检查用户操作频率
-            if (Redis::exists($userLimitKey)) {
+            // 设置分布式锁，防止重复抢取
+            if (!Redis::set($lockKey, 1, ['nx', 'ex' => 10])) {
                 return [
                     'success' => false,
-                    'msg' => '操作过于频繁，请稍候再试',
-                    'code' => 'TOO_FREQUENT'
+                    'msg' => '操作过于频繁，请稍后重试'
                 ];
             }
             
-            // 设置用户操作锁定
-            Redis::setex($userLimitKey, self::USER_GRAB_INTERVAL, 1);
+            Db::startTrans();
             
-            // 并发控制：抢红包锁
-            if (!Redis::set($lockKey, 1, 'EX', self::LOCK_EXPIRE_TIME, 'NX')) {
-                return [
-                    'success' => false,
-                    'msg' => '系统繁忙，请稍候再试',
-                    'code' => 'SYSTEM_BUSY'
-                ];
-            }
-            
-            // 查询红包信息
-            $redPacket = RedPacket::find($packetId);
+            // 查找红包
+            $redPacket = \app\model\RedPacket::lock(true)->find($packetId);
             if (!$redPacket) {
-                return [
-                    'success' => false,
-                    'msg' => '红包不存在',
-                    'code' => 'NOT_FOUND'
-                ];
+                throw new \Exception('红包不存在');
             }
             
             // 检查红包状态
-            if ($redPacket->status != self::STATUS_ACTIVE) {
+            if ($redPacket->status != 1) {
+                throw new \Exception('红包不可用');
+            }
+            
+            if ($redPacket->remain_acount <= 0) {
+                throw new \Exception('红包已被抢完');
+            }
+            
+            if (strtotime($redPacket->expire_time) < time()) {
+                throw new \Exception('红包已过期');
+            }
+            
+            // 检查是否已经抢过
+            $existRecord = \app\model\RedPacketRecord::where([
+                'packet_id' => $packetId,
+                'user_id' => $userId
+            ])->find();
+            
+            if ($existRecord) {
+                Redis::del($lockKey);
                 return [
                     'success' => false,
-                    'msg' => '红包已结束',
-                    'code' => 'PACKET_ENDED'
+                    'msg' => '您已经抢过这个红包了'
                 ];
             }
             
-            // 检查是否已抢过
-            $existingRecord = RedPacketRecord::where('packet_id', $packetId)
-                                            ->where('user_id', $user->id)
-                                            ->find();
-            if ($existingRecord) {
+            // 检查是否是自己的红包
+            if ($redPacket->sender_id == $userId) {
+                Redis::del($lockKey);
                 return [
                     'success' => false,
-                    'msg' => '您已经抢过这个红包了',
-                    'code' => 'ALREADY_GRABBED'
+                    'msg' => '不能抢自己的红包'
                 ];
             }
             
-            // 检查红包是否还有剩余
-            if ($redPacket->remain_acount <= 0 || $redPacket->remain_amount <= 0) {
-                // 更新红包状态为已完成
-                $redPacket->status = self::STATUS_COMPLETED;
-                $redPacket->save();
-                
-                return [
-                    'success' => false,
-                    'msg' => '红包已被抢完',
-                    'code' => 'PACKET_EMPTY'
-                ];
+            // 获取可抢金额
+            $grabAmount = $this->getGrabAmount($packetId);
+            if ($grabAmount <= 0) {
+                throw new \Exception('红包金额异常');
             }
-            
-            // 开始数据库事务
-            Db::startTrans();
-            
-            // 计算抢到的金额
-            $grabAmount = $this->calculateGrabAmount($redPacket);
             
             // 创建抢红包记录
-            $grabRecord = RedPacketRecord::create([
-                'packet_id' => $packetId,
-                'user_id' => $user->id,
-                'user_tg_id' => $user->user_id,
-                'amount' => $grabAmount,
-                'grab_time' => date('Y-m-d H:i:s'),
-                'grab_order' => $redPacket->total_count - $redPacket->remain_acount + 1
-            ]);
+            $grabRecord = new \app\model\RedPacketRecord();
+            $grabRecord->packet_id = $packetId;
+            $grabRecord->user_id = $userId;
+            $grabRecord->user_tg_id = $userTgId;
+            $grabRecord->username = $username;
+            $grabRecord->amount = $grabAmount;
+            $grabRecord->grab_order = $redPacket->total_count - $redPacket->remain_acount + 1;
+            $grabRecord->created_at = date('Y-m-d H:i:s');
+            $grabRecord->save();
             
-            // 更新红包剩余信息
+            // 更新红包状态
             $redPacket->remain_acount -= 1;
             $redPacket->remain_amount -= $grabAmount;
+            $redPacket->grabbed_count += 1;
+            $redPacket->grabbed_amount += $grabAmount;
             
-            // 检查是否抢完
-            $isCompleted = $redPacket->remain_acount <= 0 || $redPacket->remain_amount <= 0.01;
-            if ($isCompleted) {
-                $redPacket->status = self::STATUS_COMPLETED;
+            $isCompleted = false;
+            if ($redPacket->remain_acount <= 0) {
+                $redPacket->status = 2; // 已完成
+                $isCompleted = true;
             }
-            
             $redPacket->save();
             
             // 增加用户余额
+            $user = \app\model\User::find($userId);
             $user->money_balance += $grabAmount;
             $user->save();
             
             // 记录资金变动
-            $this->recordMoneyLog($user->id, $grabAmount, '抢红包', $packetId);
+            $this->recordMoneyLog($userId, $grabAmount, '抢红包', $redPacket->packet_id);
             
             Db::commit();
-            
-            // 释放锁
             Redis::del($lockKey);
-            
-            Log::info('抢红包成功', [
-                'packet_id' => $packetId,
-                'user_id' => $user->id,
-                'amount' => $grabAmount,
-                'grab_order' => $grabRecord->grab_order,
-                'is_completed' => $isCompleted
-            ]);
             
             return [
                 'success' => true,
@@ -691,18 +670,34 @@ class TelegramRedPacketService
             Db::rollback();
             Redis::del($lockKey);
             
-            Log::error('抢红包失败', [
-                'packet_id' => $packetId,
-                'user_id' => $user->id,
-                'error' => $e->getMessage()
-            ]);
-            
             return [
                 'success' => false,
-                'msg' => '抢红包失败: ' . $e->getMessage(),
-                'code' => 'SYSTEM_ERROR'
+                'msg' => $e->getMessage()
             ];
         }
+    }
+    
+    /**
+     * 获取抢红包金额
+     */
+    private function getGrabAmount(int $packetId): float
+    {
+        // 从红包金额分配表中获取下一个可抢金额
+        $amountRecord = \app\model\RedPacketAmount::where([
+            'packet_id' => $packetId,
+            'is_grabbed' => 0
+        ])->order('id asc')->find();
+        
+        if (!$amountRecord) {
+            return 0;
+        }
+        
+        // 标记为已抢取
+        $amountRecord->is_grabbed = 1;
+        $amountRecord->grabbed_at = date('Y-m-d H:i:s');
+        $amountRecord->save();
+        
+        return $amountRecord->amount;
     }
     
     /**

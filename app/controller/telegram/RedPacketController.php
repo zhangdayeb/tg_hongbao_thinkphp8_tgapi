@@ -340,47 +340,71 @@ class RedPacketController extends BaseTelegramController
     }
     
     /**
-     * 桥接方法：抢红包
+     * 桥接抢红包方法 - 修复参数类型
      */
-    public function bridgeGrabRedPacket(string $packetId, int $chatId, string $debugFile): bool
+    public function bridgeGrabRedPacket(string $packetId, int $chatId, string $debugFile): void
     {
+        $this->log($debugFile, "🎯 桥接抢红包: {$packetId}");
+        
         try {
-            $this->log($debugFile, "🎯 桥接抢红包: {$packetId}");
-            
-            // 防重复检查
-            if ($this->checkGrabRedPacketDuplicate($packetId, $this->currentUser->id)) {
-                $this->log($debugFile, "❌ 检测到重复抢红包");
-                return false; // 静默处理
+            // 🔥 修复：从字符串红包ID获取数据库ID
+            $redPacket = \app\model\RedPacket::where('packet_id', $packetId)->find();
+            if (!$redPacket) {
+                $this->log($debugFile, "❌ 红包不存在: {$packetId}");
+                $this->bridgeSendMessage($chatId, "❌ 红包不存在或已过期", $debugFile);
+                return;
             }
             
-            // 抢红包
-            $result = $this->redPacketService->grabRedPacket($packetId, $this->currentUser);
+            // 🔥 修复：使用数据库自增ID而不是packet_id字符串
+            $result = $this->redPacketService->grabRedPacket(
+                $redPacket->id,  // 使用int类型的数据库ID
+                $this->currentUser->id,
+                $this->currentUser->tg_id,
+                $this->currentUser->username
+            );
             
             if ($result['success']) {
-                $this->log($debugFile, "✅ 抢红包成功: " . ($result['amount'] ?? 0));
-                
-                // 发送私聊通知（如果需要）
-                if ($result['amount'] > 0) {
-                    $this->sendGrabSuccessNotification($result, $debugFile);
-                }
-                
-                $this->clearGrabRedPacketLock($packetId, $this->currentUser->id);
-                return true;
-                
+                // 抢红包成功
+                $this->sendGrabSuccessMessage($chatId, $result['data'], $debugFile);
             } else {
-                $this->log($debugFile, "❌ 抢红包失败: " . $result['msg']);
-                $this->clearGrabRedPacketLock($packetId, $this->currentUser->id);
-                return false;
+                // 抢红包失败
+                $this->bridgeSendMessage($chatId, $result['msg'], $debugFile);
             }
             
         } catch (\Exception $e) {
             $this->log($debugFile, "❌ 抢红包异常: " . $e->getMessage());
-            $this->handleException($e, "抢红包处理", $debugFile);
-            $this->clearGrabRedPacketLock($packetId, $this->currentUser->id);
-            return false;
+            $this->bridgeSendMessage($chatId, "❌ 系统异常，请稍后重试", $debugFile);
         }
     }
-    
+    /**
+     * 发送抢红包成功消息
+     */
+    private function sendGrabSuccessMessage(int $chatId, array $data, string $debugFile): void
+    {
+        $amount = $data['amount'];
+        $grabOrder = $data['grab_order'];
+        $isBestLuck = $data['is_best_luck'] ?? false;
+        $remainCount = $data['remain_acount'] ?? 0;
+        $remainAmount = $data['remain_amount'] ?? 0;
+        
+        $message = "🎉 *恭喜抢到红包！*\n\n";
+        $message .= "💰 抢到金额：`{$amount} USDT`\n";
+        $message .= "🎲 第 {$grabOrder} 个领取\n";
+        
+        if ($isBestLuck) {
+            $message .= "👑 *手气最佳！*\n";
+        }
+        
+        $message .= "\n📊 *红包状态*\n";
+        $message .= "📦 剩余个数：{$remainCount} 个\n";
+        $message .= "💎 剩余金额：{$remainAmount} USDT\n";
+        
+        if ($remainCount == 0) {
+            $message .= "\n🎊 红包已被抢完！";
+        }
+        
+        $this->bridgeSendMessage($chatId, $message, $debugFile);
+    }
     /**
      * 桥接方法：获取红包历史
      */
