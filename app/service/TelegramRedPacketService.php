@@ -553,7 +553,8 @@ class TelegramRedPacketService
     
     public function grabRedPacket($packetId, $userId, $userTgId, $username)
     {
-        $lockKey = "grab_redpacket_{$packetId}_{$userId}";
+        // 🔥 修复1：使用更具体的锁键名，避免冲突
+        $lockKey = "redpacket_grab_lock_{$packetId}_{$userId}_" . date('YmdH'); // 加入时间防止跨小时冲突
         
         try {
             // 基础验证
@@ -568,24 +569,53 @@ class TelegramRedPacketService
                 $username = "用户{$userId}";
             }
             
-            Log::info('开始抢红包', [
+            Log::info('抢红包请求', [
                 'packet_id' => $packetId,
                 'user_id' => $userId,
                 'user_tg_id' => $userTgId,
-                'username' => $username
+                'username' => $username,
+                'lock_key' => $lockKey
             ]);
             
-            // 防重复操作锁
-            if (Cache::has($lockKey)) {
-                return [
-                    'success' => false,
-                    'msg' => '操作过于频繁，请稍后重试'
-                ];
+            // 🔥 修复2：检查缓存前先记录状态
+            $cacheExists = Cache::has($lockKey);
+            if ($cacheExists) {
+                $cacheValue = Cache::get($lockKey);
+                $cacheTime = time() - ($cacheValue['timestamp'] ?? 0);
+                
+                Log::warning('发现缓存锁', [
+                    'lock_key' => $lockKey,
+                    'cache_value' => $cacheValue,
+                    'cache_age_seconds' => $cacheTime
+                ]);
+                
+                // 🔥 修复3：如果缓存超过15秒，强制清除
+                if ($cacheTime > 15) {
+                    Cache::delete($lockKey);
+                    Log::info('强制清除过期缓存锁', ['lock_key' => $lockKey]);
+                } else {
+                    return [
+                        'success' => false,
+                        'msg' => "操作过于频繁，请等待 " . (15 - $cacheTime) . " 秒后重试"
+                    ];
+                }
             }
             
-            Cache::set($lockKey, 1, 10);
+            // 🔥 修复4：设置带时间戳的锁，便于调试
+            $lockData = [
+                'user_id' => $userId,
+                'packet_id' => $packetId,
+                'timestamp' => time(),
+                'action' => 'grab_redpacket'
+            ];
+            Cache::set($lockKey, $lockData, 15); // 15秒锁定
             
-            // 🔥 修复1：获取红包信息时加锁
+            Log::info('设置抢红包锁', [
+                'lock_key' => $lockKey,
+                'lock_data' => $lockData
+            ]);
+            
+            // 获取红包信息
             $redPacket = \app\model\RedPacket::lock(true)->find($packetId);
             if (!$redPacket) {
                 Cache::delete($lockKey);
@@ -595,16 +625,13 @@ class TelegramRedPacketService
                 ];
             }
             
-            // 🔥 修复2：详细的红包状态调试
-            Log::info('红包当前状态', [
+            // 详细状态检查
+            Log::info('红包状态检查', [
                 'packet_id' => $redPacket->packet_id,
-                'db_id' => $redPacket->id,
                 'status' => $redPacket->status,
                 'remain_count' => $redPacket->remain_count,
                 'remain_amount' => $redPacket->remain_amount,
-                'total_count' => $redPacket->total_count,
-                'expire_time' => $redPacket->expire_time,
-                'current_time' => date('Y-m-d H:i:s')
+                'expire_time' => $redPacket->expire_time
             ]);
             
             // 检查红包是否过期
@@ -616,14 +643,10 @@ class TelegramRedPacketService
                 ];
             }
             
-            // 🔥 修复3：先检查剩余数量，再检查状态
+            // 检查剩余数量
             if ($redPacket->remain_count <= 0) {
-                // 如果剩余数量为0但状态未更新，立即更新
                 if ($redPacket->status == 1) {
                     $redPacket->updateToCompleted();
-                    Log::warning('发现红包剩余数量为0但状态未更新，已自动修复', [
-                        'packet_id' => $redPacket->packet_id
-                    ]);
                 }
                 Cache::delete($lockKey);
                 return [
@@ -632,8 +655,8 @@ class TelegramRedPacketService
                 ];
             }
             
-            // 🔥 修复4：检查红包状态（放在数量检查之后）
-            if ($redPacket->status !== 1) { // 1 = 活跃状态
+            // 检查红包状态
+            if ($redPacket->status !== 1) {
                 $statusTexts = [
                     0 => '红包已禁用',
                     2 => '红包已完成', 
@@ -642,12 +665,6 @@ class TelegramRedPacketService
                     5 => '红包已取消',
                 ];
                 $statusText = $statusTexts[$redPacket->status] ?? '红包状态异常';
-                
-                Log::info('红包状态不可抢取', [
-                    'packet_id' => $redPacket->packet_id,
-                    'status' => $redPacket->status,
-                    'status_text' => $statusText
-                ]);
                 
                 Cache::delete($lockKey);
                 return [
@@ -664,11 +681,6 @@ class TelegramRedPacketService
             
             if ($existingRecord) {
                 Cache::delete($lockKey);
-                Log::info('用户已抢过此红包', [
-                    'packet_id' => $redPacket->packet_id,
-                    'user_id' => $userId,
-                    'existing_amount' => $existingRecord->amount
-                ]);
                 return [
                     'success' => false,
                     'msg' => '您已经抢过这个红包了'
@@ -678,18 +690,13 @@ class TelegramRedPacketService
             // 检查是否是自己发的红包
             if ($redPacket->sender_id == $userId) {
                 Cache::delete($lockKey);
-                Log::info('用户尝试抢自己的红包', [
-                    'packet_id' => $redPacket->packet_id,
-                    'sender_id' => $redPacket->sender_id,
-                    'user_id' => $userId
-                ]);
                 return [
                     'success' => false,
                     'msg' => '不能抢自己发的红包'
                 ];
             }
             
-            // 🔥 修复5：执行抢红包，使用模型方法
+            // 执行抢红包
             Db::startTrans();
             
             $result = $redPacket->grab($userId, $userTgId, $username);
@@ -704,14 +711,16 @@ class TelegramRedPacketService
             }
             
             Db::commit();
+            
+            // 🔥 修复5：成功后立即清除锁
             Cache::delete($lockKey);
             
-            Log::info('抢红包服务成功', [
+            Log::info('抢红包成功完成', [
                 'packet_id' => $redPacket->packet_id,
                 'user_id' => $userId,
                 'amount' => $result['amount'],
                 'grab_order' => $result['grab_order'],
-                'is_completed' => $result['is_completed']
+                'lock_cleared' => true
             ]);
             
             return [
@@ -720,9 +729,7 @@ class TelegramRedPacketService
                     'amount' => $result['amount'],
                     'grab_order' => $result['grab_order'],
                     'is_best_luck' => $result['is_best'] ?? false,
-                    'is_completed' => $result['is_completed'] ?? false,
-                    'remain_count' => $redPacket->remain_count,
-                    'remain_amount' => $redPacket->remain_amount
+                    'is_completed' => $result['is_completed'] ?? false
                 ]
             ];
             
@@ -730,13 +737,16 @@ class TelegramRedPacketService
             if (Db::inTransaction()) {
                 Db::rollback();
             }
+            
+            // 🔥 修复6：异常时必须清除锁
             Cache::delete($lockKey);
             
-            Log::error('抢红包服务异常', [
+            Log::error('抢红包异常', [
                 'packet_id' => $packetId,
                 'user_id' => $userId,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'lock_key' => $lockKey,
+                'lock_cleared' => true
             ]);
             
             return [
@@ -744,6 +754,76 @@ class TelegramRedPacketService
                 'msg' => '系统异常: ' . $e->getMessage()
             ];
         }
+    }
+
+    /**
+     * 🔥 新增：清除用户所有抢红包锁的方法
+     */
+    public function clearUserGrabLocks(int $userId): int
+    {
+        $pattern = "redpacket_grab_lock_*_{$userId}_*";
+        $cleared = 0;
+        
+        try {
+            // 如果使用Redis
+            if (config('cache.default') === 'redis') {
+                $redis = \think\facade\Cache::store('redis')->handler();
+                $keys = $redis->keys($pattern);
+                if (!empty($keys)) {
+                    $cleared = $redis->del($keys);
+                }
+            } else {
+                // 文件缓存需要手动遍历（效率较低）
+                // 这里可以根据实际缓存驱动实现
+                Log::info('文件缓存驱动，无法批量清除锁', ['user_id' => $userId]);
+            }
+            
+            Log::info('清除用户抢红包锁', [
+                'user_id' => $userId,
+                'cleared_count' => $cleared
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('清除用户锁失败', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
+        }
+        
+        return $cleared;
+    }
+
+    /**
+     * 🔥 新增：清除过期锁的方法
+     */
+    public function clearExpiredGrabLocks(): int
+    {
+        $cleared = 0;
+        
+        try {
+            if (config('cache.default') === 'redis') {
+                $redis = \think\facade\Cache::store('redis')->handler();
+                $keys = $redis->keys('redpacket_grab_lock_*');
+                
+                foreach ($keys as $key) {
+                    $value = $redis->get($key);
+                    if ($value) {
+                        $data = json_decode($value, true);
+                        if (isset($data['timestamp']) && (time() - $data['timestamp']) > 20) {
+                            $redis->del($key);
+                            $cleared++;
+                        }
+                    }
+                }
+            }
+            
+            Log::info('清除过期抢红包锁', ['cleared_count' => $cleared]);
+            
+        } catch (\Exception $e) {
+            Log::error('清除过期锁失败', ['error' => $e->getMessage()]);
+        }
+        
+        return $cleared;
     }
     
     /**
