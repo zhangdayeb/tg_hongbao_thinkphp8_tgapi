@@ -149,12 +149,12 @@ class RedPacketController extends BaseTelegramController
     }
     
     /**
-     * 处理红包相关回调
+     * 处理红包相关回调 - 修复版本
      */
-    public function handleCallback(string $callbackData, int $chatId, string $debugFile): void
+    public function handleCallback(string $callbackData, int $chatId, string $debugFile, ?string $callbackQueryId = null): void
     {
         try {
-            $this->log($debugFile, "🧧 RedPacketController 处理回调: {$callbackData}");
+            $this->log($debugFile, "🧧 RedPacketController 处理回调: {$callbackData}, QueryID: {$callbackQueryId}");
             
             if (!$this->currentUser) {
                 $this->log($debugFile, "❌ 用户对象未设置");
@@ -169,8 +169,13 @@ class RedPacketController extends BaseTelegramController
                 }
             }
             
+            // 🔥 修复：设置 callbackQueryId 到处理器
+            if ($callbackQueryId && method_exists($this->callbackHandler, 'setCallbackQueryId')) {
+                $this->callbackHandler->setCallbackQueryId($callbackQueryId);
+            }
+            
             // 委托给回调处理器
-            $this->callbackHandler->handle($callbackData, $chatId, $debugFile);
+            $this->callbackHandler->handle($callbackData, $chatId, $debugFile, $callbackQueryId);
             
         } catch (\Exception $e) {
             $this->log($debugFile, "❌ 回调处理异常: " . $e->getMessage());

@@ -112,8 +112,10 @@ class CommandDispatcher extends BaseTelegramController
         }
     }
     
+    
+    
     /**
-     * 处理回调查询
+     * 处理回调查询 - 修复版本
      */
     public function handleCallback(array $update, string $debugFile): void
     {
@@ -124,7 +126,7 @@ class CommandDispatcher extends BaseTelegramController
             $queryId = $callbackQuery['id'] ?? '';
             
             $chatContext = $this->extractChatContext($callbackQuery['message']);
-            $this->log($debugFile, "收到回调 - ChatID: {$chatId}, 数据: {$callbackData}");
+            $this->log($debugFile, "收到回调 - ChatID: {$chatId}, 数据: {$callbackData}, QueryID: {$queryId}");
             
             // 安全回调响应
             $this->safeAnswerCallbackQuery($queryId, null, $debugFile);
@@ -137,7 +139,8 @@ class CommandDispatcher extends BaseTelegramController
             $user = $this->ensureUserExists($update, $debugFile);
             if (!$user) return;
             
-            $this->dispatchCallback($callbackData, $chatId, $user, $chatContext, $debugFile);
+            // 🔥 修复：传递 queryId 给回调分发方法
+            $this->dispatchCallback($callbackData, $chatId, $user, $chatContext, $debugFile, $queryId);
             
         } catch (\Exception $e) {
             $this->handleException($e, "处理回调查询", $debugFile);
@@ -314,9 +317,9 @@ class CommandDispatcher extends BaseTelegramController
     }
     
     /**
-     * 分发回调处理
+     * 分发回调处理 - 增加 callbackQueryId 参数
      */
-    private function dispatchCallback(string $callbackData, int $chatId, User $user, array $chatContext, string $debugFile): void
+    private function dispatchCallback(string $callbackData, int $chatId, User $user, array $chatContext, string $debugFile, ?string $callbackQueryId = null): void
     {
         // 特殊格式回调优先处理
         $specialHandlers = [
@@ -329,11 +332,20 @@ class CommandDispatcher extends BaseTelegramController
         
         foreach ($specialHandlers as $prefix => $controllerClass) {
             if (str_starts_with($callbackData, $prefix)) {
-                $this->createAndExecuteController($controllerClass, $user, $chatContext, function($controller) use ($callbackData, $chatId, $debugFile, $prefix) {
+                $this->createAndExecuteController($controllerClass, $user, $chatContext, function($controller) use ($callbackData, $chatId, $debugFile, $prefix, $callbackQueryId) {
                     if ($prefix === 'confirm_game_id_' && method_exists($controller, 'handleGameIdConfirmation')) {
                         $controller->handleGameIdConfirmation($callbackData, $chatId, $debugFile);
                     } else {
-                        $controller->handleCallback($callbackData, $chatId, $debugFile);
+                        // 🔥 修复：传递 callbackQueryId 给控制器
+                        if (method_exists($controller, 'handleCallback')) {
+                            // 检查方法是否接受第四个参数
+                            $reflection = new \ReflectionMethod($controller, 'handleCallback');
+                            if ($reflection->getNumberOfParameters() >= 4) {
+                                $controller->handleCallback($callbackData, $chatId, $debugFile, $callbackQueryId);
+                            } else {
+                                $controller->handleCallback($callbackData, $chatId, $debugFile);
+                            }
+                        }
                     }
                 });
                 return;
@@ -343,8 +355,17 @@ class CommandDispatcher extends BaseTelegramController
         // 常规回调映射处理
         $controllerClass = $this->callbackMap[$callbackData] ?? null;
         if ($controllerClass && class_exists($controllerClass)) {
-            $this->createAndExecuteController($controllerClass, $user, $chatContext, function($controller) use ($callbackData, $chatId, $debugFile) {
-                $controller->handleCallback($callbackData, $chatId, $debugFile);
+            $this->createAndExecuteController($controllerClass, $user, $chatContext, function($controller) use ($callbackData, $chatId, $debugFile, $callbackQueryId) {
+                // 🔥 修复：传递 callbackQueryId 给控制器
+                if (method_exists($controller, 'handleCallback')) {
+                    // 检查方法是否接受第四个参数
+                    $reflection = new \ReflectionMethod($controller, 'handleCallback');
+                    if ($reflection->getNumberOfParameters() >= 4) {
+                        $controller->handleCallback($callbackData, $chatId, $debugFile, $callbackQueryId);
+                    } else {
+                        $controller->handleCallback($callbackData, $chatId, $debugFile);
+                    }
+                }
             });
         } else {
             $this->handleUnknownCallback($callbackData, $chatId, $chatContext, $debugFile);
