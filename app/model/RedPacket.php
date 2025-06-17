@@ -406,55 +406,66 @@ class RedPacket extends Model
     }
     
     /**
-     * 抢红包 - 修复：使用事务和MoneyLog集成
+     * 抢红包方法 - 修复状态更新问题
      */
-    public function grab(int $userId, string $userTgId, string $username = ''): array
+    public function grab(int $userId, string $userTgId, string $username): array
     {
-        // 检查红包状态
-        if (!$this->can_grab) {
-            return ['success' => false, 'message' => '红包不可抢取'];
-        }
-        
-        // 检查是否已经抢过
+        // 检查是否已抢过
         $existRecord = RedPacketRecord::where('packet_id', $this->packet_id)
-                                      ->where('user_tg_id', $userTgId)
-                                      ->find();
+                                    ->where('user_id', $userId)  // 使用user_id更准确
+                                    ->find();
         
         if ($existRecord) {
             return ['success' => false, 'message' => '您已经抢过这个红包了'];
         }
         
         // 检查是否自己发的红包
-        if ($this->sender_tg_id === $userTgId) {
+        if ($this->sender_id == $userId) {
             return ['success' => false, 'message' => '不能抢自己发的红包'];
+        }
+        
+        // 🔥 修复1：先检查红包状态，避免重复检查
+        if ($this->status !== self::STATUS_ACTIVE) {
+            return ['success' => false, 'message' => '红包已结束'];
+        }
+        
+        // 🔥 修复2：实时检查剩余数量
+        if ($this->remain_count <= 0) {
+            // 如果发现剩余数量为0但状态未更新，立即更新状态
+            $this->updateToCompleted();
+            return ['success' => false, 'message' => '红包已被抢完'];
         }
         
         // 开启事务
         Db::startTrans();
         
         try {
+            // 🔥 修复3：加行锁重新查询，确保数据一致性
+            $currentPacket = self::lock(true)->find($this->id);
+            if (!$currentPacket) {
+                throw new \Exception('红包不存在');
+            }
+            
+            // 再次检查剩余数量（防止并发）
+            if ($currentPacket->remain_count <= 0) {
+                $currentPacket->updateToCompleted();
+                throw new \Exception('红包已被抢完');
+            }
+            
             // 获取一个红包金额
             $amount = $this->getOneAmount();
             if ($amount <= 0) {
-                Db::rollback();
-                return ['success' => false, 'message' => '红包已被抢完'];
+                throw new \Exception('红包已被抢完');
             }
             
-            // 更新红包剩余
-            $this->remain_amount -= $amount;
-            $this->remain_count -= 1;
+            // 🔥 修复4：原子性更新红包数据
+            $newRemainAmount = $currentPacket->remain_amount - $amount;
+            $newRemainCount = $currentPacket->remain_count - 1;
             
-            // 检查是否抢完 - 修复：使用 datetime 格式
-            if ($this->remain_count <= 0) {
-                $this->status = self::STATUS_COMPLETED;
-                $this->finished_at = date('Y-m-d H:i:s');
-            }
+            // 计算抢红包顺序
+            $grabOrder = $currentPacket->total_count - $newRemainCount;
             
-            $this->save();
-            
-            // 创建抢红包记录
-            $grabOrder = $this->total_count - $this->remain_count;
-            
+            // 🔥 修复5：先创建抢红包记录
             $record = RedPacketRecord::create([
                 'packet_id' => $this->packet_id,
                 'user_id' => $userId,
@@ -465,7 +476,34 @@ class RedPacket extends Model
                 'created_at' => date('Y-m-d H:i:s'),
             ]);
             
-            // 给用户加余额 - 修复：使用新的方法
+            // 🔥 修复6：然后更新红包主表数据
+            $updateData = [
+                'remain_amount' => $newRemainAmount,
+                'remain_count' => $newRemainCount,
+            ];
+            
+            // 检查是否抢完 - 自动更新状态
+            if ($newRemainCount <= 0) {
+                $updateData['status'] = self::STATUS_COMPLETED;
+                $updateData['finished_at'] = date('Y-m-d H:i:s');
+            }
+            
+            // 执行更新
+            $updateResult = self::where('id', $this->id)->update($updateData);
+            
+            if (!$updateResult) {
+                throw new \Exception('红包状态更新失败');
+            }
+            
+            // 🔥 修复7：更新当前对象状态
+            $this->remain_amount = $newRemainAmount;
+            $this->remain_count = $newRemainCount;
+            if ($newRemainCount <= 0) {
+                $this->status = self::STATUS_COMPLETED;
+                $this->finished_at = date('Y-m-d H:i:s');
+            }
+            
+            // 给用户加余额
             $user = User::find($userId);
             if (!$user) {
                 throw new \Exception('用户不存在');
@@ -475,44 +513,83 @@ class RedPacket extends Model
                 throw new \Exception('余额更新失败');
             }
             
-            // 检查手气最佳
-            if ($this->status === self::STATUS_COMPLETED) {
-                $this->setBestLuck();
-            }
+            Db::commit();
             
-            // 更新统计
-            $this->updateStats($userId);
-            
-            // 清除缓存
-            $this->clearCache();
-            
-            // 记录抢红包日志
-            trace([
-                'action' => 'redpacket_grabbed',
+            // 🔥 修复8：记录详细的成功信息
+            Log::info('抢红包成功', [
                 'packet_id' => $this->packet_id,
                 'user_id' => $userId,
-                'user_tg_id' => $userTgId,
                 'amount' => $amount,
                 'grab_order' => $grabOrder,
-                'remain_count' => $this->remain_count,
-                'timestamp' => time(),
-            ], 'redpacket');
-            
-            Db::commit();
+                'new_remain_count' => $newRemainCount,
+                'new_remain_amount' => $newRemainAmount,
+                'is_completed' => $newRemainCount <= 0
+            ]);
             
             return [
                 'success' => true,
                 'amount' => $amount,
                 'grab_order' => $grabOrder,
-                'is_completed' => $this->status === self::STATUS_COMPLETED,
-                'is_best' => false, // 暂时返回false，手气最佳需要等红包抢完后确定
+                'is_completed' => $newRemainCount <= 0,
+                'is_best' => false, // 手气最佳需要等红包抢完后确定
             ];
             
         } catch (\Exception $e) {
             Db::rollback();
-            return ['success' => false, 'message' => '抢红包失败：' . $e->getMessage()];
+            
+            Log::error('抢红包失败', [
+                'packet_id' => $this->packet_id,
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
+            
+            return ['success' => false, 'message' => $e->getMessage()];
         }
     }
+
+    /**
+     * 🔥 新增：更新红包为已完成状态
+     */
+    public function updateToCompleted(): bool
+    {
+        try {
+            $updateData = [
+                'status' => self::STATUS_COMPLETED,
+                'finished_at' => date('Y-m-d H:i:s'),
+            ];
+            
+            // 如果剩余数量不为0，也要清零
+            if ($this->remain_count > 0) {
+                $updateData['remain_count'] = 0;
+            }
+            
+            $result = self::where('id', $this->id)->update($updateData);
+            
+            // 更新当前对象状态
+            if ($result) {
+                $this->status = self::STATUS_COMPLETED;
+                $this->finished_at = date('Y-m-d H:i:s');
+                if ($this->remain_count > 0) {
+                    $this->remain_count = 0;
+                }
+            }
+            
+            Log::info('红包状态更新为已完成', [
+                'packet_id' => $this->packet_id,
+                'result' => $result
+            ]);
+            
+            return $result > 0;
+            
+        } catch (\Exception $e) {
+            Log::error('更新红包完成状态失败', [
+                'packet_id' => $this->packet_id,
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
+    }
+
     
     /**
      * 撤回红包 - 修复：使用事务和MoneyLog集成
@@ -784,24 +861,31 @@ class RedPacket extends Model
     }
     
     /**
-     * 获取一个红包金额
+     * 🔥 修复：改进金额分配算法
      */
     private function getOneAmount(): float
     {
-        $cacheKey = 'redpacket_amounts_' . $this->packet_id;
-        $amounts = cache($cacheKey) ?: [];
-        
-        if (empty($amounts)) {
-            return 0.00;
+        // 如果是最后一个红包，返回剩余所有金额
+        if ($this->remain_count == 1) {
+            return $this->remain_amount;
         }
         
-        // 取出一个金额
-        $amount = array_shift($amounts);
+        // 确保至少留给每个剩余红包 0.01
+        $minReserve = ($this->remain_count - 1) * 0.01;
+        $maxAmount = $this->remain_amount - $minReserve;
         
-        // 更新缓存
-        cache($cacheKey, $amounts, 86400);
+        // 确保金额不会太小
+        $minAmount = 0.01;
+        $maxAmount = max($minAmount, min($maxAmount, $this->remain_amount * 0.5));
         
-        return (float)$amount;
+        if ($maxAmount <= $minAmount) {
+            return $minAmount;
+        }
+        
+        // 生成随机金额
+        $amount = mt_rand($minAmount * 100, $maxAmount * 100) / 100;
+        
+        return round($amount, 2);
     }
     
     /**
