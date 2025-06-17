@@ -5,6 +5,7 @@ namespace app\handler;
 
 use app\service\TelegramRedPacketService;
 use app\model\User;
+use think\facade\Cache;  // 🔥 添加这一行！
 use app\controller\BaseTelegramController;
 
 /**
@@ -133,7 +134,7 @@ class RedPacketCallbackHandler extends BaseTelegramController
             $packetId = str_replace('grab_redpacket_', '', $callbackData);
             $this->log($debugFile, "🎁 处理抢红包: {$packetId}");
             
-            // 🔥 新增：基于 QueryID 的去重检查
+            // 🔥 现在 Cache 类可以正常使用了
             if ($this->currentCallbackQueryId) {
                 $queryKey = "callback_processed_{$this->currentCallbackQueryId}";
                 if (Cache::has($queryKey)) {
@@ -146,7 +147,7 @@ class RedPacketCallbackHandler extends BaseTelegramController
                 $this->log($debugFile, "✅ 标记回调查询已处理: {$this->currentCallbackQueryId}");
             }
             
-            // 🔥 立即响应用户操作（改进响应时机）
+            // 立即响应用户操作
             if ($this->currentCallbackQueryId) {
                 $this->safeAnswerCallbackQuery($this->currentCallbackQueryId, "正在抢红包...", $debugFile);
             }
