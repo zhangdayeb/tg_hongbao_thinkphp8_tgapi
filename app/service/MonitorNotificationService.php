@@ -239,7 +239,7 @@ class MonitorNotificationService
     }
     
     /**
-     * 检查广告表 - 支持多种发送模式
+     * 检查广告表 - 修复版本
      */
     private function checkAdvertisementTable(string $currentTime): array
     {
@@ -251,14 +251,17 @@ class MonitorNotificationService
                 return $result;
             }
             
+            // 先预处理时间变量，避免在复杂查询中出现作用域问题
             $currentDateTime = new \DateTime($currentTime);
             $currentDate = $currentDateTime->format('Y-m-d');
             $currentTimeOnly = $currentDateTime->format('H:i');
             
-            // 查找需要发送的广告
+            Log::info("检查广告表 - 当前时间: {$currentTime}, 日期: {$currentDate}, 时间: {$currentTimeOnly}");
+            
+            // 简化查询条件，分步骤查询避免复杂嵌套
             $pendingAds = Advertisement::where('status', 1) // 只查找启用状态
                 ->where(function($query) use ($currentDate) {
-                    // 检查有效期
+                    // 检查有效期 - 简化条件
                     $query->where(function($subQuery) use ($currentDate) {
                         $subQuery->whereNull('start_date')
                                 ->whereOr('start_date', '<=', $currentDate);
@@ -267,44 +270,65 @@ class MonitorNotificationService
                                 ->whereOr('end_date', '>=', $currentDate);
                     });
                 })
-                ->where(function($query) use ($currentTime, $currentTimeOnly) {
-                    $query->where(function($subQuery) use ($currentTime) {
-                        // 模式1：一次性定时发送
-                        $subQuery->where('send_mode', 1)
-                                ->where('is_sent', 0) // 未发送过
-                                ->where('send_time', '<=', $currentTime);
-                    })->whereOr(function($subQuery) use ($currentTimeOnly) {
-                        // 模式2：每日定时发送
-                        $subQuery->where('send_mode', 2)
-                                ->where(function($innerQuery) use ($currentTimeOnly, $currentTime) {
-                                    $innerQuery->where(function($timeQuery) use ($currentTimeOnly) {
-                                        // 正常时间匹配
-                                        $timeQuery->whereRaw("FIND_IN_SET(?, daily_times)", [$currentTimeOnly]);
-                                    })->whereOr(function($startupQuery) use ($currentTime) {
-                                        // 🚀 启动时发送：如果从未发送过，立即发送一轮
-                                        $startupQuery->whereNull('last_sent_time')
-                                                    ->whereOrRaw("DATE(last_sent_time) < DATE(?)", [$currentTime]);
-                                    });
-                                });
-                    })->whereOr(function($subQuery) use ($currentTime) {
-                        // 模式3：循环间隔发送
-                        $subQuery->where('send_mode', 3)
-                                ->where(function($innerQuery) use ($currentTime) {
-                                    $innerQuery->whereNull('last_sent_time') // 🚀 启动时立即发送
-                                            ->whereOrRaw("TIMESTAMPDIFF(MINUTE, last_sent_time, ?) >= interval_minutes", 
-                                                        [$currentTime]);
-                                });
-                    });
-                })
                 ->order('created_at', 'asc')
                 ->select();
             
-            $result['count'] = count($pendingAds);
+            Log::info("查询到 " . count($pendingAds) . " 条启用状态的广告");
+            
+            // 手动过滤需要发送的广告，避免复杂SQL查询
+            $filteredAds = [];
+            foreach ($pendingAds as $ad) {
+                $shouldSend = false;
+                
+                // 模式1：一次性定时发送
+                if ($ad->send_mode == 1) {
+                    if ($ad->is_sent == 0 && $ad->send_time <= $currentTime) {
+                        $shouldSend = true;
+                        Log::info("广告ID {$ad->id} - 模式1：一次性定时发送符合条件");
+                    }
+                }
+                // 模式2：每日定时发送
+                elseif ($ad->send_mode == 2) {
+                    if (!empty($ad->daily_times)) {
+                        $dailyTimes = explode(',', $ad->daily_times);
+                        // 检查当前时间是否在每日发送时间列表中
+                        if (in_array($currentTimeOnly, $dailyTimes)) {
+                            $shouldSend = true;
+                            Log::info("广告ID {$ad->id} - 模式2：每日定时发送符合条件");
+                        }
+                    }
+                    // 启动时发送：如果从未发送过或今天未发送过
+                    if (empty($ad->last_sent_time) || date('Y-m-d', strtotime($ad->last_sent_time)) < $currentDate) {
+                        $shouldSend = true;
+                        Log::info("广告ID {$ad->id} - 模式2：启动时首次发送");
+                    }
+                }
+                // 模式3：循环间隔发送
+                elseif ($ad->send_mode == 3) {
+                    if (empty($ad->last_sent_time)) {
+                        $shouldSend = true; // 启动时立即发送
+                        Log::info("广告ID {$ad->id} - 模式3：启动时首次发送");
+                    } elseif (!empty($ad->interval_minutes)) {
+                        $lastSentTime = strtotime($ad->last_sent_time);
+                        $minutesPassed = (time() - $lastSentTime) / 60;
+                        if ($minutesPassed >= $ad->interval_minutes) {
+                            $shouldSend = true;
+                            Log::info("广告ID {$ad->id} - 模式3：循环间隔发送符合条件，间隔 {$minutesPassed} 分钟");
+                        }
+                    }
+                }
+                
+                if ($shouldSend) {
+                    $filteredAds[] = $ad;
+                }
+            }
+            
+            $result['count'] = count($filteredAds);
             Log::info("发现 {$result['count']} 条待发送广告");
             
-            foreach ($pendingAds as $ad) {
+            foreach ($filteredAds as $ad) {
                 try {
-                    // 🚀 启动时发送提示
+                    // 启动时发送提示
                     $isStartupSend = empty($ad->last_sent_time);
                     if ($isStartupSend) {
                         Log::info("广告ID {$ad->id} - 启动时首次发送");
