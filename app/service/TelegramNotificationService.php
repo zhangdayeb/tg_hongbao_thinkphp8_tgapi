@@ -32,7 +32,7 @@ class TelegramNotificationService
     }
     
     /**
-     * 发送到所有群组
+     * 发送到所有群组 - 支持无群组模式
      */
     public function sendToAllGroups(string $messageType, array $templateData, string $sourceType, int $sourceId = 0): array
     {
@@ -40,6 +40,26 @@ class TelegramNotificationService
         $results = [];
         
         Log::info("开始向 " . count($groups) . " 个群组发送 {$messageType} 通知");
+        
+        // 🔧 新增：如果没有群组，记录到日志并返回成功状态
+        if (empty($groups)) {
+            Log::info("无可用群组，将通知记录到日志: {$messageType}");
+            
+            // 格式化消息内容用于日志
+            $logContent = $this->formatMessageForLog($messageType, $templateData);
+            Log::info("通知内容: " . $logContent);
+            
+            // 记录到消息日志表
+            $this->logMessage('system_log', $messageType, $templateData, 
+                ['ok' => true, 'description' => '已记录到日志'], $sourceType, $sourceId);
+            
+            return [[
+                'group_id' => 'system_log',
+                'group_name' => '系统日志',
+                'success' => true,
+                'message' => '已记录到系统日志'
+            ]];
+        }
         
         foreach ($groups as $group) {
             $result = $this->sendToGroup(
@@ -66,6 +86,38 @@ class TelegramNotificationService
         return $results;
     }
     
+
+    /**
+     * 格式化消息内容用于日志记录
+     */
+    private function formatMessageForLog(string $messageType, array $templateData): string
+    {
+        $template = config("notification_templates.{$messageType}");
+        
+        if (!$template) {
+            return json_encode($templateData);
+        }
+        
+        try {
+            // 使用 MessageTemplateService 格式化模板
+            $messageTemplateService = new MessageTemplateService();
+            $content = $messageTemplateService->formatTemplate($template, $templateData);
+            
+            if (isset($content['text'])) {
+                return $content['text'];
+            } elseif (isset($content['caption'])) {
+                return $content['caption'];
+            } else {
+                return json_encode($content);
+            }
+        } catch (\Exception $e) {
+            // 如果格式化失败，直接返回原始数据
+            Log::warning("格式化模板失败: " . $e->getMessage());
+            return json_encode($templateData);
+        }
+    }
+
+
     /**
      * 发送到指定群组
      */
