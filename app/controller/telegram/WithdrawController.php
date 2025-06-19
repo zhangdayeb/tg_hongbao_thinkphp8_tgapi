@@ -1253,9 +1253,10 @@ class WithdrawController extends BaseTelegramController
     }
     
     /**
-     * 获取状态图标
+     * 🔧 核心修复：将 getStatusIcon 方法的访问级别从 private 改为 protected
+     * 这样就不会与父类 BaseTelegramController 中的 protected getStatusIcon 方法冲突
      */
-    private function getStatusIcon(string $status): string
+    protected function getStatusIcon(string $status): string
     {
         $iconMap = [
             'pending' => '⏳',
