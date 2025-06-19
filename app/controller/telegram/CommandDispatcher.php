@@ -65,6 +65,8 @@ class CommandDispatcher extends BaseTelegramController
         'set_withdraw_password' => WithdrawController::class,
         'bind_usdt_address' => WithdrawController::class,
         'confirm_withdraw' => WithdrawController::class,
+        'cancel_withdraw' => WithdrawController::class,      // 👈 添加这个
+        'retry_withdraw' => WithdrawController::class,       // 👈 添加这个
         'withdraw_history' => WithdrawController::class,
         'modify_address' => WithdrawController::class,
         'invite' => InviteController::class,

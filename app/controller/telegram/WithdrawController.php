@@ -107,6 +107,14 @@ class WithdrawController extends BaseTelegramController
     {
         $this->log($debugFile, "WithdrawController 处理回调: {$callbackData}");
         
+        // 👈 临时添加调试日志
+        $currentUser = $this->getCurrentUser();
+        if ($currentUser) {
+            $this->log($debugFile, "✅ 用户已正确设置: ID={$currentUser->id}");
+        } else {
+            $this->log($debugFile, "❌ 用户未设置！这就是问题所在");
+        }
+        
         try {
             switch ($callbackData) {
                 case 'withdraw':
