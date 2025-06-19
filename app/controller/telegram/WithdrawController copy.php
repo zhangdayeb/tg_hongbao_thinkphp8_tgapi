@@ -7,18 +7,14 @@ use app\controller\BaseTelegramController;
 use app\common\helper\TemplateHelper;
 use app\common\CacheHelper;
 use app\common\SecurityHelper;
-use app\model\User;
 
 /**
  * 提现控制器 - 使用模板系统版本
  * 统一使用TemplateHelper管理所有消息和键盘模板
- * 修复版：添加用户管理机制，照搬PaymentController成功模式
  */
 class WithdrawController extends BaseTelegramController
 {
     private $withdrawService;
-    private ?User $currentUser = null;  // 👈 新增：当前用户对象
-    
     // 提现相关状态常量
     private const STATE_SETTING_PASSWORD = 'withdraw_setting_password';
     private const STATE_BINDING_ADDRESS = 'withdraw_binding_address';
@@ -26,6 +22,7 @@ class WithdrawController extends BaseTelegramController
     private const STATE_ENTERING_PASSWORD = 'withdraw_entering_password';
     private const STATE_MODIFYING_ADDRESS = 'withdraw_modifying_address';
     
+
     /**
      * 构造函数 - 在这里初始化服务
      */
@@ -37,24 +34,6 @@ class WithdrawController extends BaseTelegramController
     }
 
     /**
-     * 设置当前用户（供CommandDispatcher调用）
-     * 👈 新增：照搬PaymentController的用户管理
-     */
-    public function setUser(User $user): void
-    {
-        $this->currentUser = $user;
-    }
-    
-    /**
-     * 获取当前用户
-     * 👈 新增：照搬PaymentController的用户管理
-     */
-    protected function getCurrentUser(): ?User
-    {
-        return $this->currentUser;
-    }
-
-    /**
      * 处理 /withdraw 命令或提现主界面
      */
     public function handle(string $command, int $chatId, string $debugFile): void
@@ -62,36 +41,18 @@ class WithdrawController extends BaseTelegramController
         $this->log($debugFile, "WithdrawController 处理命令: {$command}");
         
         try {
-            // 🔧 修复：使用新的用户获取方式
-            try {
-                $user = $this->getCurrentUser();
-                if (!$user) {
-                    $userId = $this->getUserIdFromChatId($chatId);
-                    $user = User::find($userId);
-                }
-                
-                if (!$user) {
-                    throw new \Exception('用户不存在');
-                }
-                
-                // 转换为数组格式（保持业务逻辑兼容性）
-                $userData = [
-                    'id' => $user->id,
-                    'balance' => $user->money_balance,
-                    'has_withdraw_pwd' => $user->withdraw_password_set == 1,
-                    'withdraw_password' => $user->withdraw_pwd,
-                    'usdt_address' => $user->usdt_address ?? '',
-                    'status' => $user->status
-                ];
-                
-            } catch (\Exception $e) {
-                $this->log($debugFile, "❌ 获取用户失败: " . $e->getMessage());
+            // 获取模拟用户数据
+            // ✅ 替换为
+            $tgUserId = $chatId; // 或者从消息中获取实际的 telegram user id
+            $userData = $this->getRealUser($tgUserId);
+            if (!$userData) {
                 $this->sendMessage($chatId, '❌ 用户未注册，请先注册', $debugFile);
                 return;
             }
+            $user = $userData;
             
             // 检查前置条件并显示主界面
-            $this->showWithdrawMain($chatId, $userData, $debugFile);
+            $this->showWithdrawMain($chatId, $user, $debugFile);
             
         } catch (\Exception $e) {
             $this->handleException($e, "处理提现命令", $debugFile);
@@ -110,35 +71,15 @@ class WithdrawController extends BaseTelegramController
         try {
             switch ($callbackData) {
                 case 'withdraw':
-                    // 🔧 修复：使用新的用户获取方式
-                    try {
-                        $user = $this->getCurrentUser();
-                        if (!$user) {
-                            $userId = $this->getUserIdFromChatId($chatId);
-                            $user = User::find($userId);
-                        }
-                        
-                        if (!$user) {
-                            throw new \Exception('用户不存在');
-                        }
-                        
-                        // 转换为数组格式（保持业务逻辑兼容性）
-                        $userData = [
-                            'id' => $user->id,
-                            'balance' => $user->money_balance,
-                            'has_withdraw_pwd' => $user->withdraw_password_set == 1,
-                            'withdraw_password' => $user->withdraw_pwd,
-                            'usdt_address' => $user->usdt_address ?? '',
-                            'status' => $user->status
-                        ];
-                        
-                    } catch (\Exception $e) {
-                        $this->log($debugFile, "❌ 获取用户失败: " . $e->getMessage());
+                    // ✅ 替换为
+                    $tgUserId = $chatId; // 或者从消息中获取实际的 telegram user id
+                    $userData = $this->getRealUser($tgUserId);
+                    if (!$userData) {
                         $this->sendMessage($chatId, '❌ 用户未注册，请先注册', $debugFile);
                         return;
                     }
-                    
-                    $this->showWithdrawMain($chatId, $userData, $debugFile);
+                    $user = $userData;
+                    $this->showWithdrawMain($chatId, $user, $debugFile);
                     break;
                     
                 case 'set_withdraw_password':
@@ -359,27 +300,17 @@ class WithdrawController extends BaseTelegramController
             return;
         }
         
-        // 🔧 修复：使用新的用户获取方式
-        try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                $userId = $this->getUserIdFromChatId($chatId);
-                $user = User::find($userId);
-            }
-            
-            if (!$user) {
-                throw new \Exception('用户不存在');
-            }
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 获取用户失败: " . $e->getMessage());
+        // 🔧 修复：获取真实用户数据
+        $tgUserId = $chatId;
+        $userData = $this->getRealUser($tgUserId);
+        if (!$userData) {
             $this->sendMessage($chatId, '❌ 用户未注册，请先注册', $debugFile);
             return;
         }
         
         try {
             // 🔧 修复：使用用户的数据库ID而不是Telegram ID
-            $result = $this->withdrawService->setWithdrawPassword($user->id, $text);
+            $result = $this->withdrawService->setWithdrawPassword($userData['id'], $text);
             if ($result['code'] !== 200) {
                 $this->sendMessage($chatId, '❌ ' . $result['msg'], $debugFile);
                 return;
@@ -393,16 +324,8 @@ class WithdrawController extends BaseTelegramController
             $this->sendMessage($chatId, $message, $debugFile);
             
             // 🔧 修复：重新获取用户数据后显示主界面
-            $updatedUser = User::find($user->id);
-            if ($updatedUser) {
-                $updatedUserData = [
-                    'id' => $updatedUser->id,
-                    'balance' => $updatedUser->money_balance,
-                    'has_withdraw_pwd' => $updatedUser->withdraw_password_set == 1,
-                    'withdraw_password' => $updatedUser->withdraw_pwd,
-                    'usdt_address' => $updatedUser->usdt_address ?? '',
-                    'status' => $updatedUser->status
-                ];
+            $updatedUserData = $this->getRealUser($tgUserId);
+            if ($updatedUserData) {
                 $this->showWithdrawMain($chatId, $updatedUserData, $debugFile);
             } else {
                 // 备用方案：返回主菜单
@@ -415,7 +338,7 @@ class WithdrawController extends BaseTelegramController
                 $this->sendMessageWithKeyboard($chatId, $backMessage, $keyboard, $debugFile);
             }
             
-            $this->log($debugFile, "✅ 提现密码设置成功，用户ID: " . $user->id);
+            $this->log($debugFile, "✅ 提现密码设置成功，用户ID: " . $userData['id']);
             
         } catch (\Exception $e) {
             $this->log($debugFile, "❌ 设置提现密码异常: " . $e->getMessage());
@@ -470,27 +393,17 @@ class WithdrawController extends BaseTelegramController
             return;
         }
         
-        // 🔧 修复：使用新的用户获取方式
-        try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                $userId = $this->getUserIdFromChatId($chatId);
-                $user = User::find($userId);
-            }
-            
-            if (!$user) {
-                throw new \Exception('用户不存在');
-            }
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 获取用户失败: " . $e->getMessage());
+        // 🔧 修复：获取真实用户数据
+        $tgUserId = $chatId;
+        $userData = $this->getRealUser($tgUserId);
+        if (!$userData) {
             $this->sendMessage($chatId, '❌ 用户未注册，请先注册', $debugFile);
             return;
         }
         
         try {
             // 🔧 修复：使用用户的数据库ID而不是Telegram ID
-            $result = $this->withdrawService->bindUsdtAddress($user->id, $text);
+            $result = $this->withdrawService->bindUsdtAddress($userData['id'], $text);
             if ($result['code'] !== 200) {
                 $this->sendMessage($chatId, '❌ ' . $result['msg'], $debugFile);
                 return;
@@ -507,16 +420,8 @@ class WithdrawController extends BaseTelegramController
             $this->sendMessage($chatId, $message, $debugFile);
             
             // 🔧 修复：重新获取更新后的用户数据显示主界面
-            $updatedUser = User::find($user->id);
-            if ($updatedUser) {
-                $updatedUserData = [
-                    'id' => $updatedUser->id,
-                    'balance' => $updatedUser->money_balance,
-                    'has_withdraw_pwd' => $updatedUser->withdraw_password_set == 1,
-                    'withdraw_password' => $updatedUser->withdraw_pwd,
-                    'usdt_address' => $updatedUser->usdt_address ?? '',
-                    'status' => $updatedUser->status
-                ];
+            $updatedUserData = $this->getRealUser($tgUserId);
+            if ($updatedUserData) {
                 $this->showWithdrawMain($chatId, $updatedUserData, $debugFile);
             } else {
                 // 备用方案：返回主菜单
@@ -529,7 +434,7 @@ class WithdrawController extends BaseTelegramController
                 $this->sendMessageWithKeyboard($chatId, $backMessage, $keyboard, $debugFile);
             }
             
-            $this->log($debugFile, "✅ USDT地址绑定成功，用户ID: " . $user->id . ", 地址: " . $text);
+            $this->log($debugFile, "✅ USDT地址绑定成功，用户ID: " . $userData['id'] . ", 地址: " . $text);
             
         } catch (\Exception $e) {
             $this->log($debugFile, "❌ 绑定USDT地址异常: " . $e->getMessage());
@@ -562,40 +467,21 @@ class WithdrawController extends BaseTelegramController
     {
         $this->log($debugFile, "开始提现申请流程");
         
-        // 🔧 修复：使用新的用户获取方式
-        try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                $userId = $this->getUserIdFromChatId($chatId);
-                $user = User::find($userId);
-            }
-            
-            if (!$user) {
-                throw new \Exception('用户不存在');
-            }
-            
-            // 转换为数组格式（保持业务逻辑兼容性）
-            $userData = [
-                'id' => $user->id,
-                'balance' => $user->money_balance,
-                'has_withdraw_pwd' => $user->withdraw_password_set == 1,
-                'withdraw_password' => $user->withdraw_pwd,
-                'usdt_address' => $user->usdt_address ?? '',
-                'status' => $user->status
-            ];
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 获取用户失败: " . $e->getMessage());
+        // ✅ 替换为
+        $tgUserId = $chatId; // 或者从消息中获取实际的 telegram user id
+        $userData = $this->getRealUser($tgUserId);
+        if (!$userData) {
             $this->sendMessage($chatId, '❌ 用户未注册，请先注册', $debugFile);
             return;
         }
+        $user = $userData;
         
         $this->setUserState($chatId, self::STATE_ENTERING_AMOUNT);
         
         // 准备模板数据
         $data = [
-            'balance' => number_format($userData['balance'], 2),
-            'address' => SecurityHelper::maskSensitiveData($userData['usdt_address'], 'usdt_address')
+            'balance' => number_format($user['balance'], 2),
+            'address' => SecurityHelper::maskSensitiveData($user['usdt_address'], 'usdt_address')
         ];
         
         // 获取输入提现金额消息模板
@@ -622,35 +508,14 @@ class WithdrawController extends BaseTelegramController
         }
         
         $amount = (float)$text;
-        
-        // 🔧 修复：使用新的用户获取方式
-        try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                $userId = $this->getUserIdFromChatId($chatId);
-                $user = User::find($userId);
-            }
-            
-            if (!$user) {
-                throw new \Exception('用户不存在');
-            }
-            
-            // 转换为数组格式（保持业务逻辑兼容性）
-            $userData = [
-                'id' => $user->id,
-                'balance' => $user->money_balance,
-                'has_withdraw_pwd' => $user->withdraw_password_set == 1,
-                'withdraw_password' => $user->withdraw_pwd,
-                'usdt_address' => $user->usdt_address ?? '',
-                'status' => $user->status
-            ];
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 获取用户失败: " . $e->getMessage());
+        // ✅ 替换为
+        $tgUserId = $chatId; // 或者从消息中获取实际的 telegram user id
+        $userData = $this->getRealUser($tgUserId);
+        if (!$userData) {
             $this->sendMessage($chatId, '❌ 用户未注册，请先注册', $debugFile);
             return;
         }
-        
+        $user = $userData;
         $config = config('telegram.withdraw', []);
         
         // 验证金额范围
@@ -676,9 +541,9 @@ class WithdrawController extends BaseTelegramController
         $totalRequired = $amount + $fee;
         
         // 验证余额
-        if ($userData['balance'] < $totalRequired) {
+        if ($user['balance'] < $totalRequired) {
             $data = [
-                'balance' => number_format($userData['balance'], 2),
+                'balance' => number_format($user['balance'], 2),
                 'required' => number_format($totalRequired, 2),
                 'fee' => number_format($fee, 2)
             ];
@@ -699,7 +564,7 @@ class WithdrawController extends BaseTelegramController
             'amount' => number_format($amount, 2),
             'fee' => number_format($fee, 2),
             'actual_amount' => number_format($actualAmount, 2),
-            'address' => SecurityHelper::maskSensitiveData($userData['usdt_address'], 'usdt_address')
+            'address' => SecurityHelper::maskSensitiveData($user['usdt_address'], 'usdt_address')
         ];
         
         // 获取确认提现信息消息模板
@@ -718,30 +583,10 @@ class WithdrawController extends BaseTelegramController
     {
         $this->log($debugFile, "处理提现密码验证: " . str_repeat('*', strlen($text)));
         
-        // 🔧 修复：使用新的用户获取方式
-        try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                $userId = $this->getUserIdFromChatId($chatId);
-                $user = User::find($userId);
-            }
-            
-            if (!$user) {
-                throw new \Exception('用户不存在');
-            }
-            
-            // 转换为数组格式（保持业务逻辑兼容性）
-            $userData = [
-                'id' => $user->id,
-                'balance' => $user->money_balance,
-                'has_withdraw_pwd' => $user->withdraw_password_set == 1,
-                'withdraw_password' => $user->withdraw_pwd,
-                'usdt_address' => $user->usdt_address ?? '',
-                'status' => $user->status
-            ];
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 获取用户失败: " . $e->getMessage());
+        // 获取真实用户数据
+        $tgUserId = $chatId;
+        $userData = $this->getRealUser($tgUserId);
+        if (!$userData) {
             $this->sendMessage($chatId, '❌ 用户未注册，请先注册', $debugFile);
             return;
         }
@@ -829,35 +674,16 @@ class WithdrawController extends BaseTelegramController
         // 清除状态
         $this->clearUserState($chatId);
         
-        // 🔧 修复：使用新的用户获取方式
-        try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                $userId = $this->getUserIdFromChatId($chatId);
-                $user = User::find($userId);
-            }
-            
-            if (!$user) {
-                throw new \Exception('用户不存在');
-            }
-            
-            // 转换为数组格式（保持业务逻辑兼容性）
-            $userData = [
-                'id' => $user->id,
-                'balance' => $user->money_balance,
-                'has_withdraw_pwd' => $user->withdraw_password_set == 1,
-                'withdraw_password' => $user->withdraw_pwd,
-                'usdt_address' => $user->usdt_address ?? '',
-                'status' => $user->status
-            ];
-            
-            $this->showWithdrawMain($chatId, $userData, $debugFile);
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 获取用户失败: " . $e->getMessage());
+        // 返回主界面
+        // ✅ 替换为
+        $tgUserId = $chatId; // 或者从消息中获取实际的 telegram user id
+        $userData = $this->getRealUser($tgUserId);
+        if (!$userData) {
             $this->sendMessage($chatId, '❌ 用户未注册，请先注册', $debugFile);
             return;
         }
+        $user = $userData;
+        $this->showWithdrawMain($chatId, $user, $debugFile);
     }
     
     /**
@@ -870,35 +696,15 @@ class WithdrawController extends BaseTelegramController
         // 清除状态，重新开始
         $this->clearUserState($chatId);
         
-        // 🔧 修复：使用新的用户获取方式
-        try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                $userId = $this->getUserIdFromChatId($chatId);
-                $user = User::find($userId);
-            }
-            
-            if (!$user) {
-                throw new \Exception('用户不存在');
-            }
-            
-            // 转换为数组格式（保持业务逻辑兼容性）
-            $userData = [
-                'id' => $user->id,
-                'balance' => $user->money_balance,
-                'has_withdraw_pwd' => $user->withdraw_password_set == 1,
-                'withdraw_password' => $user->withdraw_pwd,
-                'usdt_address' => $user->usdt_address ?? '',
-                'status' => $user->status
-            ];
-            
-            $this->showWithdrawMain($chatId, $userData, $debugFile);
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 获取用户失败: " . $e->getMessage());
+        // ✅ 替换为
+        $tgUserId = $chatId; // 或者从消息中获取实际的 telegram user id
+        $userData = $this->getRealUser($tgUserId);
+        if (!$userData) {
             $this->sendMessage($chatId, '❌ 用户未注册，请先注册', $debugFile);
             return;
         }
+        $user = $userData;
+        $this->showWithdrawMain($chatId, $user, $debugFile);
     }
     
     /**
@@ -952,25 +758,15 @@ class WithdrawController extends BaseTelegramController
     {
         $this->log($debugFile, "开始修改USDT地址流程");
         
-        // 🔧 修复：使用新的用户获取方式
-        try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                $userId = $this->getUserIdFromChatId($chatId);
-                $user = User::find($userId);
-            }
-            
-            if (!$user) {
-                throw new \Exception('用户不存在');
-            }
-            
-            $currentAddress = $user->usdt_address ?? '';
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 获取用户失败: " . $e->getMessage());
+        // ✅ 替换为
+        $tgUserId = $chatId; // 或者从消息中获取实际的 telegram user id
+        $userData = $this->getRealUser($tgUserId);
+        if (!$userData) {
             $this->sendMessage($chatId, '❌ 用户未注册，请先注册', $debugFile);
             return;
         }
+        $user = $userData;
+        $currentAddress = $user['usdt_address'] ?? '';
         
         $this->setUserState($chatId, self::STATE_MODIFYING_ADDRESS);
         
@@ -1000,27 +796,17 @@ class WithdrawController extends BaseTelegramController
             return;
         }
         
-        // 🔧 修复：使用新的用户获取方式
-        try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                $userId = $this->getUserIdFromChatId($chatId);
-                $user = User::find($userId);
-            }
-            
-            if (!$user) {
-                throw new \Exception('用户不存在');
-            }
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 获取用户失败: " . $e->getMessage());
+        // 🔧 修复：获取真实用户数据
+        $tgUserId = $chatId;
+        $userData = $this->getRealUser($tgUserId);
+        if (!$userData) {
             $this->sendMessage($chatId, '❌ 用户未注册，请先注册', $debugFile);
             return;
         }
         
         try {
             // 🔧 修复：使用用户的数据库ID调用更新地址服务
-            $result = $this->withdrawService->updateUsdtAddress($user->id, $text);
+            $result = $this->withdrawService->updateUsdtAddress($userData['id'], $text);
             if ($result['code'] !== 200) {
                 $this->sendMessage($chatId, '❌ ' . $result['msg'], $debugFile);
                 return;
@@ -1037,16 +823,8 @@ class WithdrawController extends BaseTelegramController
             $this->sendMessage($chatId, $message, $debugFile);
             
             // 🔧 修复：重新获取更新后的用户数据显示主界面
-            $updatedUser = User::find($user->id);
-            if ($updatedUser) {
-                $updatedUserData = [
-                    'id' => $updatedUser->id,
-                    'balance' => $updatedUser->money_balance,
-                    'has_withdraw_pwd' => $updatedUser->withdraw_password_set == 1,
-                    'withdraw_password' => $updatedUser->withdraw_pwd,
-                    'usdt_address' => $updatedUser->usdt_address ?? '',
-                    'status' => $updatedUser->status
-                ];
+            $updatedUserData = $this->getRealUser($tgUserId);
+            if ($updatedUserData) {
                 $this->showWithdrawMain($chatId, $updatedUserData, $debugFile);
             } else {
                 // 备用方案：返回主菜单
@@ -1059,7 +837,7 @@ class WithdrawController extends BaseTelegramController
                 $this->sendMessageWithKeyboard($chatId, $backMessage, $keyboard, $debugFile);
             }
             
-            $this->log($debugFile, "✅ USDT地址修改成功，用户ID: " . $user->id . ", 新地址: " . $text);
+            $this->log($debugFile, "✅ USDT地址修改成功，用户ID: " . $userData['id'] . ", 新地址: " . $text);
             
         } catch (\Exception $e) {
             $this->log($debugFile, "❌ 修改USDT地址异常: " . $e->getMessage());
@@ -1086,47 +864,11 @@ class WithdrawController extends BaseTelegramController
     // ==================== 工具方法 ====================
     
     /**
-     * 从ChatID获取系统用户ID（照搬PaymentController的成功模式）
-     * 👈 新增：核心修复方法
-     */
-    private function getUserIdFromChatId(int $chatId): int
-    {
-        try {
-            // 方法1: 通过当前用户对象获取（优先使用）
-            if ($this->currentUser instanceof User) {
-                $this->log('debug', "通过currentUser获取用户ID: {$this->currentUser->id}");
-                return $this->currentUser->id;
-            }
-            
-            // 方法2: 直接查询数据库
-            $user = User::where('tg_id', (string)$chatId)->find();
-            if ($user) {
-                $this->log('debug', "通过数据库查询获取用户ID: {$user->id}");
-                return $user->id;
-            }
-            
-            // 如果都找不到，抛出异常
-            throw new \Exception('用户不存在');
-            
-        } catch (\Exception $e) {
-            // 记录错误日志
-            \think\facade\Log::error('获取用户ID失败', [
-                'chat_id' => $chatId,
-                'error' => $e->getMessage(),
-                'current_user' => $this->currentUser ? $this->currentUser->id : 'null'
-            ]);
-            
-            // 抛出异常让上层处理
-            throw new \Exception('用户不存在');
-        }
-    }
-    
-    /**
-     * 获取用户数据（保留原有方法作为备用）
+     * 获取用户数据
      */
     private function getRealUser(int $tgUserId): ?array
     {
-        $user = User::where('tg_id', (string)$tgUserId)->find();
+        $user = \app\model\User::where('tg_id', (string)$tgUserId)->find();
         if (!$user) {
             return null;
         }
@@ -1222,42 +964,7 @@ class WithdrawController extends BaseTelegramController
         return 'W' . date('Ymd') . rand(100000, 999999);
     }
     
-    /**
-     * 获取模拟提现记录
-     */
-    private function getMockWithdrawHistory(int $chatId): array
-    {
-        // 模拟数据，实际应该从数据库查询
-        return [
-            [
-                'order_no' => 'W20250619001',
-                'amount' => 100.00,
-                'status' => 'pending',
-                'apply_time' => '2025-06-19 10:30:00'
-            ],
-            [
-                'order_no' => 'W20250618002', 
-                'amount' => 50.00,
-                'status' => 'success',
-                'apply_time' => '2025-06-18 15:20:00'
-            ]
-        ];
-    }
-    
-    /**
-     * 获取状态图标
-     */
-    private function getStatusIcon(string $status): string
-    {
-        $iconMap = [
-            'pending' => '⏳',
-            'success' => '✅',
-            'failed' => '❌',
-            'cancelled' => '🚫'
-        ];
-        
-        return $iconMap[$status] ?? '❓';
-    }
+
     
     /**
      * 获取状态文本
