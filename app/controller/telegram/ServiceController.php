@@ -78,7 +78,7 @@ class ServiceController extends BaseTelegramController
         
         $keyboard = [
             [
-                ['text' => '🎰唯一客服', 'url' => 'https://t.me/xg_soft_bot'],
+                ['text' => '🎰唯一客服', 'url' => 'https://t.me/cgvip_game_bot'],
                 ['text' => '💰唯一财务', 'url' => 'https://t.me/xiaoxiaoxiaomama']
             ],
             [

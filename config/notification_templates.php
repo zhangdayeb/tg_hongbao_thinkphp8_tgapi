@@ -15,14 +15,14 @@ return [
     // 充值通知模板 - 图片 + 简单文字
     'recharge_notify' => [
         'type' => 'photo',
-        'image_url' => 'https://tgapi.oyim.top/static/default.jpg',
+        'image_url' => 'https://tgapi.oyim.top/static/default.png',
         'caption' => "🎉 恭喜 {user_name} 成功充值 {money} USDT\n⏰ {create_time}"
     ],
 
     // 提现通知模板 - 图片 + 简单文字
     'withdraw_notify' => [
         'type' => 'photo',
-        'image_url' => 'https://tgapi.oyim.top/static/default.jpg', 
+        'image_url' => 'https://tgapi.oyim.top/static/default.png', 
         'caption' => "💰 恭喜 {user_name} 成功提现 {money} USDT\n⏰ {create_time}"
     ],
 
@@ -65,7 +65,7 @@ return [
     'default_values' => [
         'user_name' => '匿名用户',
         'title' => '恭喜发财，大吉大利',
-        'image_url' => 'https://tgapi.oyim.top/static/default.jpg'
+        'image_url' => 'https://tgapi.oyim.top/static/default.png'
     ],
 
     // 时间格式配置
@@ -84,8 +84,8 @@ return [
 
     // 默认图片配置
     'default_images' => [
-        'recharge' => 'https://tgapi.oyim.top/static/default.jpg',
-        'withdraw' => 'https://tgapi.oyim.top/static/default.jpg',
-        'advertisement' => 'https://tgapi.oyim.top/static/default.jpg'
+        'recharge' => 'https://tgapi.oyim.top/static/default.png',
+        'withdraw' => 'https://tgapi.oyim.top/static/default.png',
+        'advertisement' => 'https://tgapi.oyim.top/static/default.png'
     ]
 ];

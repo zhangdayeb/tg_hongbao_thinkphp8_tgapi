@@ -10,7 +10,7 @@ return [
     // Bot 基本信息
     'bot_token' => env('TELEGRAM_BOT_TOKEN', ''),
     'bot_username' => env('TELEGRAM_BOT_USERNAME', ''),
-    'bot_name' => env('TELEGRAM_BOT_NAME', '盛邦娱乐机器人'),
+    'bot_name' => env('TELEGRAM_BOT_NAME', 'CG国际娱乐机器人'),
     
     // API 配置
     'api_url' => 'https://api.telegram.org/bot',
@@ -33,18 +33,18 @@ return [
     // 外部链接配置
     'links' => [
         // 游戏相关
-        'game_url' => env('GAME_ENTRANCE_URL', 'https://game.tgapi.oyim.top'),
-        'game_group_url' => env('GAME_GROUP_URL', 'https://t.me/+IN8NfevhJuI4NTJl'),
+        'game_url' => env('GAME_ENTRANCE_URL', 'http://www.cg888.vip'),
+        'game_group_url' => env('GAME_GROUP_URL', 'https://t.me/CGvip88888'),
         
         // 客服相关
-        'customer_service_url' => env('CUSTOMER_SERVICE_URL', 'https://t.me/xg_soft_bot'),
-        'finance_service_url' => env('FINANCE_SERVICE_URL', 'https://t.me/xiaoxiaoxiaomama'),
+        'customer_service_url' => env('CUSTOMER_SERVICE_URL', 'https://t.me/CGkf0001'),
+        'finance_service_url' => env('FINANCE_SERVICE_URL', 'https://t.me/CGkf0002'),
         
         // 其他链接
-        'official_channel_url' => env('OFFICIAL_CHANNEL_URL', 'https://t.me/your_official_channel'),
-        'win_culture_url' => env('WIN_CULTURE_URL', 'https://www.google.com'),
-        'daily_news_url' => env('DAILY_NEWS_URL', 'https://www.google.com'), 
-        'today_headlines_url' => env('TODAY_HEADLINES_URL', 'https://www.google.com'),
+        'official_channel_url' => env('OFFICIAL_CHANNEL_URL', 'https://t.me/CGvip88888'),
+        'win_culture_url' => env('WIN_CULTURE_URL', 'https://t.me/CGvip88888'),
+        'daily_news_url' => env('DAILY_NEWS_URL', 'https://t.me/CGvip88888'), 
+        'today_headlines_url' => env('TODAY_HEADLINES_URL', 'https://t.me/CGvip88888'),
     ],
     
     // 业务配置

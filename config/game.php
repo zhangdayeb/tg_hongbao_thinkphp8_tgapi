@@ -8,7 +8,7 @@
 return [
     // 游戏平台基本配置
     'platform' => [
-        'name' => '盛邦国际娱乐城',
+        'name' => '盛CG国际娱乐',
         'code' => 'SHENGHANG',
         'api_url' => env('GAME_API_URL', ''),
         'api_key' => env('GAME_API_KEY', ''),

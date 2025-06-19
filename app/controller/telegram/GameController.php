@@ -39,10 +39,10 @@ class GameController extends BaseTelegramController
         
         $keyboard = [
             [
-                ['text' => '🎰 立即游戏', 'url' => config('telegram.links.game_url', 'https://game.tgapi.oyim.top')]
+                ['text' => '🎰 立即游戏', 'url' => config('telegram.links.game_url', 'http://www.cg888.vip')]
             ],
             [
-                ['text' => '👥 游戏群组', 'url' => config('telegram.links.game_group_url', 'https://t.me/+IN8NfevhJuI4NTJl')]
+                ['text' => '👥 游戏群组', 'url' => config('telegram.links.game_group_url', 'https://t.me/CGvip88888')]
             ],
             [
                 ['text' => '🔙 返回主菜单', 'callback_data' => 'back_to_main']

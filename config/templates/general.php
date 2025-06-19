@@ -10,21 +10,26 @@ return [
     // 通用消息模板
     'messages' => [
         // 欢迎消息
-        'welcome' => '🔥盛邦国际娱乐城 诚挚欢迎您的驾临🔥
-💎无需注册，无需实名，即可游戏💎
-💰USDT充提，安全可靠大额无忧💰
-🎮真人视讯/电子娱乐/捕鱼游戏🎮
-🍀精彩游戏，丰厚大奖，等您来赢🍀
-🔥已上市优先担保500万🔥',
+        'welcome' => '🌟🌟 CG国际娱乐🌟🌟
+🎉诚挚欢迎您的驾临🎉
+💎💎  实体赌场直营   💎💎
+💎💎      支        持    💎💎
+💎💎  帝  豪  赌  场 💎💎
+💎💎  星  际  赌  场 💎💎
+💎💎  码  房  取  现 💎💎
+💎💎  无  需  实  名 💎💎
+💎💎注册即可游戏💎💎
+💰汇旺、U钱包、ABA充提💰
+👍安全可靠   大额无忧👍
+🎮真人/电子/棋牌/捕鱼🎮
+🔥丰厚大奖，等您来赢🔥',
 
         // 帮助信息
-        'help' => '🤖 *盛邦娱乐机器人帮助*
+        'help' => '🤖 *CG国际娱乐机器人帮助*
 
 📋 *可用命令*：
 • /start - 显示主菜单
 • /help - 显示此帮助
-• /withdraw - 提现功能
-• /recharge - 充值功能
 
 💡 *使用提示*：
 • 点击菜单按钮进行操作
@@ -61,7 +66,7 @@ return [
         // 主菜单键盘 - 唯一真正通用的键盘
         'main_menu' => [
             [
-                ['text' => '🌟开始盛邦国际娱乐城在线游戏🔥', 'url' => '{game_url}']
+                ['text' => '🌟开始盛CG国际娱乐在线游戏🔥', 'url' => '{game_url}']
             ],
             [
                 ['text' => '✅官方游戏入群✅', 'url' => '{game_group_url}']
@@ -80,9 +85,9 @@ return [
             ],
             [
                 ['text' => '✅官方频道', 'url' => '{official_channel_url}'],
-                ['text' => '🎁包赢文化', 'callback_data' => 'win_culture'],
-                ['text' => '🤝每日吃瓜', 'callback_data' => 'daily_news'],
-                ['text' => '📢今日头条', 'callback_data' => 'today_headlines']
+                ['text' => '🎁包赢文化', 'url' => '{win_culture_url}'],
+                ['text' => '🤝每日吃瓜', 'url' => '{daily_news_url}'],
+                ['text' => '📢今日头条', 'url' => '{today_headlines_url}']
             ]
         ],
 

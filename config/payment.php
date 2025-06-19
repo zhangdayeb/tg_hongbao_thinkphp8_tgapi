@@ -220,26 +220,7 @@ return [
         'max_failed_attempts' => 5, // 最大失败尝试次数
         'lockout_duration' => 1800, // 锁定时间(秒)
     ],
-    
-    // 第三方接口配置
-    'gateways' => [
-        'usdt' => [
-            'enabled' => true,
-            'api_url' => env('USDT_API_URL', ''),
-            'api_key' => env('USDT_API_KEY', ''),
-            'api_secret' => env('USDT_API_SECRET', ''),
-            'timeout' => 30,
-            'retry_count' => 3,
-        ],
-        'huiwang' => [
-            'enabled' => true,
-            'api_url' => env('HUIWANG_API_URL', ''),
-            'api_key' => env('HUIWANG_API_KEY', ''),
-            'timeout' => 30,
-            'retry_count' => 3,
-        ]
-    ],
-    
+        
     // 测试模式配置
     'test_mode' => [
         'enabled' => env('PAYMENT_TEST_MODE', false),
