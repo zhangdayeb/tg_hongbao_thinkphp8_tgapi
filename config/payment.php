@@ -37,6 +37,20 @@ return [
                 'fee_rate' => 0,
                 'fee_fixed' => 0,
                 'sort_order' => 2
+            ],
+            'aba' => [
+                'name' => 'ABA银行转账',
+                'code' => 'aba',
+                'enabled' => true,
+                'icon' => '🏦',
+                'description' => 'ABA银行快速转账',
+                'network' => null,
+                'min_amount' => 10.00,
+                'max_amount' => 999999.99,
+                'processing_time' => '30分钟-2小时',
+                'fee_rate' => 0,
+                'fee_fixed' => 0,
+                'sort_order' => 3
             ]
         ],
         

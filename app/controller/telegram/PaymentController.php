@@ -87,6 +87,10 @@ class PaymentController extends BaseTelegramController
                 case 'recharge_huiwang':
                     $this->requestAmountInput($chatId, 'huiwang', $debugFile);
                     break;
+
+                case 'recharge_aba':  // 👈 添加这个新的 case
+                    $this->requestAmountInput($chatId, 'aba', $debugFile);
+                    break;
                     
                 case 'confirm_amount':
                     $this->confirmAmountAndShowPayment($chatId, $debugFile);
@@ -486,6 +490,8 @@ class PaymentController extends BaseTelegramController
             
             if ($method === 'usdt') {
                 $this->showUSDTPayment($chatId, $amount, $account, $debugFile);
+            } elseif ($method === 'aba') {
+                $this->showABAPayment($chatId, $amount, $account, $debugFile);  // 👈 添加 ABA 处理
             } else {
                 $this->showHuiwangPayment($chatId, $amount, $account, $debugFile);
             }
@@ -644,6 +650,103 @@ class PaymentController extends BaseTelegramController
         }
     }
     
+
+    /**
+     * 显示ABA银行支付页面
+     */
+    private function showABAPayment(int $chatId, float $amount, array $account, string $debugFile): void
+    {
+        // 设置状态为等待支付
+        $userState = $this->getUserState($chatId);
+        $userState['data']['account'] = $account;
+        $this->setUserState($chatId, 'waiting_payment', $userState['data']);
+        
+        $feeInfo = $userState['data']['fee_info'] ?? ['fee_amount' => 0, 'actual_amount' => $amount];
+        
+        try {
+            // 如果有二维码，先发送二维码图片
+            if (!empty($account['qr_code_url'])) {
+                $this->sendPhoto($chatId, $account['qr_code_url'], '🏛️ ABA银行充值二维码\n请使用ABA手机银行扫码转账', $debugFile);
+            }
+            
+            // 显示ABA银行账号信息
+            $message = "🏛️ *ABA银行充值*\n\n";
+            
+            // 充值金额信息
+            $message .= "💰 *充值信息*\n";
+            $message .= "• 充值金额：" . number_format($amount, 2) . " USDT\n";
+            
+            if ($feeInfo['fee_amount'] > 0) {
+                $message .= "• 手续费：" . number_format($feeInfo['fee_amount'], 2) . " USDT\n";
+                $message .= "• 实际到账：" . number_format($feeInfo['actual_amount'], 2) . " USDT\n";
+            } else {
+                $message .= "• 手续费：免费\n";
+                $message .= "• 实际到账：" . number_format($amount, 2) . " USDT\n";
+            }
+            
+            $message .= "• 到账时间：30分钟-2小时\n\n";
+            
+            // ABA银行账号信息
+            $message .= "🏦 *ABA银行收款信息*\n";
+            $message .= "• 户名：{$account['account_name']}\n";
+            $message .= "• 账号：`{$account['account_number']}`\n";
+            $message .= "• 银行：ABA银行\n\n";
+            
+            $message .= "📝 *转账步骤*\n";
+            
+            if (!empty($account['qr_code_url'])) {
+                $message .= "1. 扫描上方二维码 或 复制账号信息\n";
+                $message .= "2. 通过ABA手机银行转账\n";
+                $message .= "3. 转账金额：" . number_format($amount, 2) . " 瑞尔/美元\n";
+                $message .= "4. 转账完成后点击\"转账完成\"\n";
+                $message .= "5. 输入ABA转账订单号\n\n";
+            } else {
+                $message .= "1. 复制上方账号信息\n";
+                $message .= "2. 通过ABA手机银行转账\n";
+                $message .= "3. 转账金额：" . number_format($amount, 2) . " 瑞尔/美元\n";
+                $message .= "4. 转账完成后点击\"转账完成\"\n";
+                $message .= "5. 输入ABA转账订单号\n\n";
+            }
+            
+            $message .= "⚠️ *重要*：请确保转账金额准确无误";
+            
+            $keyboard = [
+                [['text' => '📋 复制账号', 'callback_data' => 'copy_account']],
+                [['text' => '✅ 转账完成', 'callback_data' => 'transfer_complete']],
+                [['text' => '💰 联系财务', 'url' => config('telegram.links.finance_service_url')]],
+                [['text' => '❌ 取消充值', 'callback_data' => 'cancel_recharge']]
+            ];
+            
+            $this->sendMessageWithKeyboard($chatId, $message, $keyboard, $debugFile);
+            $this->log($debugFile, "✅ 显示ABA银行支付页面: {$amount} USDT, 账号: {$account['account_number']}, 二维码: " . (!empty($account['qr_code_url']) ? '有' : '无'));
+            
+        } catch (\Exception $e) {
+            $this->log($debugFile, "❌ 显示ABA银行支付页面失败: " . $e->getMessage());
+            
+            // 回退到联系财务模式
+            $message = "🏛️ *ABA银行充值 - 联系财务*\n\n";
+            $message .= "• 充值金额：" . number_format($amount, 2) . " USDT\n";
+            $message .= "• 手续费：免费\n";
+            $message .= "• 实际到账：" . number_format($amount, 2) . " USDT\n";
+            $message .= "• 到账时间：30分钟-2小时\n\n";
+            $message .= "📞 *操作步骤*\n";
+            $message .= "1. 联系财务客服\n";
+            $message .= "2. 提供充值金额\n";
+            $message .= "3. 获取ABA转账信息\n";
+            $message .= "4. 完成银行转账\n\n";
+            $message .= "💡 ABA银行充值需要人工处理";
+            
+            $keyboard = [
+                [['text' => '💰 联系财务', 'url' => config('telegram.links.finance_service_url')]],
+                [['text' => '❌ 取消充值', 'callback_data' => 'cancel_recharge']]
+            ];
+            
+            $this->sendMessageWithKeyboard($chatId, $message, $keyboard, $debugFile);
+            $this->log($debugFile, "✅ 回退显示ABA联系财务页面: {$amount} USDT");
+        }
+    }
+
+
     /**
      * 处理复制地址（USDT）
      */
@@ -715,6 +818,12 @@ class PaymentController extends BaseTelegramController
             $message .= "请输入您的转账哈希值（TxID）：\n\n";
             $message .= "💡 可在钱包的转账记录中找到\n";
             $message .= "💡 通常以0x开头的长字符串\n\n";
+            $message .= "请直接发送订单号，无需点击任何按钮：";
+        } elseif ($method === 'aba') {
+            $message = "✅ *转账完成确认*\n\n";
+            $message .= "请输入ABA银行转账的订单号：\n\n";
+            $message .= "💡 可在ABA手机银行转账记录中找到\n";
+            $message .= "💡 通常为数字组合，如：ABA202506190001\n\n";
             $message .= "请直接发送订单号，无需点击任何按钮：";
         } else {
             $message = "✅ *转账完成确认*\n\n";

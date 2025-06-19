@@ -25,6 +25,7 @@ class RechargeService
     // 支付方式常量
     const METHOD_HUIWANG = 'huiwang';
     const METHOD_USDT = 'usdt';
+    const METHOD_ABA = 'aba';
     
     
     // =================== 核心业务方法 ===================
@@ -216,15 +217,16 @@ class RechargeService
                     // USDT/加密货币账户
                     $accountData['payment_address'] = $optimalAccount->wallet_address;
                     $accountData['copy_text'] = $optimalAccount->wallet_address;
-                } elseif ($optimalAccount->account_type === 'bank' || $method === self::METHOD_HUIWANG) {
-                    // 银行账户（汇旺支付）
+                } elseif ($optimalAccount->account_type === 'bank' || $method === self::METHOD_HUIWANG || $method === self::METHOD_ABA) {  // 👈 添加ABA判断
+                    // 银行账户（汇旺支付/ABA银行）
                     $accountData['account_number'] = $optimalAccount->account_number;
                     $accountData['bank_name'] = $optimalAccount->bank_name;
                     $accountData['copy_text'] = $optimalAccount->account_number;
                     
-                    // 确保汇旺支付账户包含必要的银行信息
+                    // 确保银行账户包含必要的银行信息
                     if (empty($accountData['account_number']) || empty($accountData['bank_name'])) {
-                        Log::warning('汇旺支付账户信息不完整', [
+                        Log::warning('银行账户信息不完整', [
+                            'method' => $method,  // 👈 添加方式信息
                             'account_id' => $optimalAccount->id,
                             'account_number' => $optimalAccount->account_number,
                             'bank_name' => $optimalAccount->bank_name
@@ -644,6 +646,7 @@ class RechargeService
         $icons = [
             self::METHOD_USDT => '₿',
             self::METHOD_HUIWANG => '⚡',
+            self::METHOD_ABA => '🏦',  // 👈 添加这一行
         ];
         return $icons[$method] ?? '💰';
     }
@@ -715,6 +718,7 @@ class RechargeService
         $feeMap = [
             self::METHOD_USDT => 0.0,
             self::METHOD_HUIWANG => 0.0,
+            self::METHOD_ABA => 0.0,  // 👈 添加这一行
         ];
         return $feeMap[$method] ?? 0.0;
     }
@@ -726,7 +730,8 @@ class RechargeService
     {
         $networks = [
             self::METHOD_USDT => 'TRC-20',
-            self::METHOD_HUIWANG => '银行转账'
+            self::METHOD_HUIWANG => '银行转账',
+            self::METHOD_ABA => 'ABA银行转账'  // 👈 添加这一行
         ];
         return $networks[$method] ?? 'Unknown';
     }
@@ -738,7 +743,8 @@ class RechargeService
     {
         $times = [
             self::METHOD_USDT => '1-3分钟',
-            self::METHOD_HUIWANG => '5-10分钟'
+            self::METHOD_HUIWANG => '5-10分钟',
+            self::METHOD_ABA => '30分钟-2小时'  // 👈 添加这一行
         ];
         return $times[$method] ?? '实时到账';
     }
@@ -754,6 +760,14 @@ class RechargeService
                 '2. 打开钱包APP转账',
                 '3. 点击"转账完成"',
                 '4. 等待系统确认'
+            ];
+        } elseif ($method === self::METHOD_ABA) {  // 👈 添加这个条件
+            return [
+                '1. 复制ABA银行账号',
+                '2. 通过ABA手机银行转账',
+                '3. 点击"转账完成"',
+                '4. 输入转账单号',
+                '5. 等待人工审核'
             ];
         } else {
             return [
@@ -775,7 +789,6 @@ class RechargeService
             return null;
         }
         
-        // 简单策略：使用次数最少的账户，优先选择信息完整的账户
         $optimalAccount = null;
         $minUsageCount = PHP_INT_MAX;
         
@@ -786,12 +799,23 @@ class RechargeService
             
             // 对汇旺支付进行额外验证
             if ($account->method_code === self::METHOD_HUIWANG) {
-                // 确保汇旺支付账户有必要的银行信息
                 if (empty($account->account_number) || empty($account->bank_name) || empty($account->account_name)) {
                     Log::warning('跳过信息不完整的汇旺支付账户', [
                         'account_id' => $account->id,
                         'account_number' => $account->account_number,
                         'bank_name' => $account->bank_name,
+                        'account_name' => $account->account_name
+                    ]);
+                    continue;
+                }
+            }
+            
+            // 👈 添加ABA银行验证
+            if ($account->method_code === self::METHOD_ABA) {
+                if (empty($account->account_number) || empty($account->account_name)) {
+                    Log::warning('跳过信息不完整的ABA银行账户', [
+                        'account_id' => $account->id,
+                        'account_number' => $account->account_number,
                         'account_name' => $account->account_name
                     ]);
                     continue;
@@ -804,7 +828,7 @@ class RechargeService
             }
         }
         
-        return $optimalAccount ?: $accounts[0]; // 如果没找到，返回第一个
+        return $optimalAccount ?: $accounts[0];
     }
     
     /**

@@ -115,6 +115,7 @@ return [
             [
                 ['text' => '🏦 汇旺充值', 'callback_data' => 'recharge_huiwang']
             ],
+            [['text' => '🏛️ ABA银行', 'callback_data' => 'recharge_aba']], // 新增
             [
                 ['text' => '🔙 返回主菜单', 'callback_data' => 'back_to_main']
             ]

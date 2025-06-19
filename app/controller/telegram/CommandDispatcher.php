@@ -53,6 +53,7 @@ class CommandDispatcher extends BaseTelegramController
         'recharge' => PaymentController::class,
         'recharge_usdt' => PaymentController::class,
         'recharge_huiwang' => PaymentController::class,
+        'recharge_aba' => PaymentController::class,  // 👈 添加这一行
         'confirm_amount' => PaymentController::class,
         'copy_address' => PaymentController::class,
         'copy_account' => PaymentController::class,

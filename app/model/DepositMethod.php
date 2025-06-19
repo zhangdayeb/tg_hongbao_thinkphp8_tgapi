@@ -45,9 +45,8 @@ class DepositMethod extends Model
      */
     public const METHOD_USDT = 'usdt';           // USDT充值
     public const METHOD_HUIWANG = 'huiwang';     // 汇旺充值
-    public const METHOD_ALIPAY = 'alipay';       // 支付宝
-    public const METHOD_WECHAT = 'wechat';       // 微信支付
-    public const METHOD_BANK = 'bank';           // 银行转账
+    public const METHOD_ABA = 'aba';
+
     
     /**
      * 获取验证规则
@@ -191,9 +190,7 @@ class DepositMethod extends Model
         $tags = [
             self::METHOD_USDT => ['text' => 'USDT', 'color' => 'success'],
             self::METHOD_HUIWANG => ['text' => '汇旺', 'color' => 'primary'],
-            self::METHOD_ALIPAY => ['text' => '支付宝', 'color' => 'info'],
-            self::METHOD_WECHAT => ['text' => '微信', 'color' => 'success'],
-            self::METHOD_BANK => ['text' => '银行', 'color' => 'warning'],
+            self::METHOD_ABA => ['text' => 'ABA银行', 'color' => 'warning'],  // 👈 修正这里
         ];
         
         $code = $data['method_code'] ?? '';
@@ -494,9 +491,7 @@ class DepositMethod extends Model
         $defaultIcons = [
             self::METHOD_USDT => 'usdt.png',
             self::METHOD_HUIWANG => 'huiwang.png',
-            self::METHOD_ALIPAY => 'alipay.png',
-            self::METHOD_WECHAT => 'wechat.png',
-            self::METHOD_BANK => 'bank.png',
+            self::METHOD_ABA => 'aba.png',
         ];
         
         $icon = $defaultIcons[$this->method_code] ?? 'default.png';
