@@ -66,7 +66,7 @@ return [
         // 主菜单键盘 - 唯一真正通用的键盘
         'main_menu' => [
             [
-                ['text' => '🌟开始盛CG国际娱乐在线游戏🔥', 'url' => '{game_url}']
+                ['text' => '🌟开始CG国际娱乐在线游戏🔥', 'url' => '{game_url}']
             ],
             [
                 ['text' => '✅官方游戏入群✅', 'url' => '{game_group_url}']
