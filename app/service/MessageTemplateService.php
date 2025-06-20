@@ -12,27 +12,6 @@ use think\facade\Log;
  */
 class MessageTemplateService
 {
-    /**
-     * 格式化模板
-     */
-    public function formatTemplate(array $template, array $data): array
-    {
-        try {
-            // 预处理数据
-            $processedData = $this->preprocessData($data);
-            
-            // 根据模板类型处理
-            return match($template['type']) {
-                'photo' => $this->formatPhotoTemplate($template, $processedData),
-                'text_with_button' => $this->formatButtonTemplate($template, $processedData),
-                default => $this->formatTextTemplate($template, $processedData)
-            };
-            
-        } catch (\Exception $e) {
-            Log::error("模板格式化失败: " . $e->getMessage());
-            throw $e;
-        }
-    }
     
     /**
      * 格式化图片模板（充值、提现、广告）
@@ -53,6 +32,28 @@ class MessageTemplateService
     {
         $result = [
             'type' => 'text_with_button',
+            'text' => $this->replaceVariables($template['text'], $data)
+        ];
+        
+        // 处理按钮
+        if (isset($template['button'])) {
+            $result['button'] = [
+                'text' => $this->replaceVariables($template['button']['text'], $data),
+                'callback_data' => $this->replaceVariables($template['button']['callback_data'], $data)
+            ];
+        }
+        
+        return $result;
+    }
+
+    /**
+     * 格式化图片+按钮组合模板 - 新增方法
+     */
+    private function formatPhotoThenButtonTemplate(array $template, array $data): array
+    {
+        $result = [
+            'type' => 'photo_then_button',
+            'image_url' => $this->replaceVariables($template['image_url'], $data),
             'text' => $this->replaceVariables($template['text'], $data)
         ];
         
@@ -317,7 +318,30 @@ class MessageTemplateService
             'errors' => $errors
         ];
     }
-    
+    /**
+     * 格式化模板
+     */
+    public function formatTemplate(array $template, array $data): array
+    {
+        try {
+            // 预处理数据
+            $processedData = $this->preprocessData($data);
+            
+            // 根据模板类型处理
+            return match($template['type']) {
+                'photo' => $this->formatPhotoTemplate($template, $processedData),
+                'text_with_button' => $this->formatButtonTemplate($template, $processedData),
+                'photo_then_button' => $this->formatPhotoThenButtonTemplate($template, $processedData), // 新增
+                default => $this->formatTextTemplate($template, $processedData)
+            };
+            
+        } catch (\Exception $e) {
+            Log::error("模板格式化失败: " . $e->getMessage());
+            throw $e;
+        }
+    }
+
+
     /**
      * 获取模板预览
      */

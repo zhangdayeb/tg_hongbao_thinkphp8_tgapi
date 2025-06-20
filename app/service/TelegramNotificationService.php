@@ -117,15 +117,6 @@ class TelegramNotificationService
         }
     }
 
-
-    /**
-     * 发送到指定群组
-     */
-    public function sendToTargetGroup(string $chatId, string $messageType, array $templateData, string $sourceType, int $sourceId = 0): array
-    {
-        return $this->sendToGroup($chatId, $messageType, $templateData, $sourceType, $sourceId);
-    }
-    
     /**
      * 核心发送方法
      */
@@ -145,6 +136,7 @@ class TelegramNotificationService
             $result = match($template['type']) {
                 'photo' => $this->sendPhoto($chatId, $messageContent),
                 'text_with_button' => $this->sendTextWithButton($chatId, $messageContent),
+                'photo_then_button' => $this->sendPhotoThenButton($chatId, $messageContent), // 新增
                 default => $this->sendText($chatId, $messageContent)
             };
             
@@ -170,6 +162,49 @@ class TelegramNotificationService
             ];
         }
     }
+
+    /**
+     * 发送图片然后发送带按钮的文字 - 新增方法
+     */
+    private function sendPhotoThenButton(string $chatId, array $content): array
+    {
+        try {
+            // 先发送图片
+            $photoResult = $this->sendPhoto($chatId, [
+                'image_url' => $content['image_url'],
+                'caption' => '' // 图片不带文字
+            ]);
+            
+            // 延迟0.5秒，避免消息发送太快
+            usleep(500000);
+            
+            // 再发送带按钮的文字
+            $textResult = $this->sendTextWithButton($chatId, [
+                'text' => $content['text'],
+                'button' => $content['button'] ?? null
+            ]);
+            
+            // 如果图片发送失败，至少要保证文字+按钮发送成功
+            if (!($photoResult['ok'] ?? false)) {
+                Log::warning("红包图片发送失败，但继续发送文字: " . ($photoResult['description'] ?? ''));
+            }
+            
+            // 返回文字消息的结果（因为按钮更重要）
+            return $textResult;
+            
+        } catch (\Exception $e) {
+            Log::error("组合发送失败: " . $e->getMessage());
+            return ['ok' => false, 'description' => $e->getMessage()];
+        }
+    }
+    /**
+     * 发送到指定群组
+     */
+    public function sendToTargetGroup(string $chatId, string $messageType, array $templateData, string $sourceType, int $sourceId = 0): array
+    {
+        return $this->sendToGroup($chatId, $messageType, $templateData, $sourceType, $sourceId);
+    }
+    
     
     /**
      * 格式化消息内容

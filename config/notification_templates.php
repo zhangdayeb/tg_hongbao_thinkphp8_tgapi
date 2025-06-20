@@ -9,26 +9,27 @@ return [
     // 系统启动通知模板 - 简单版本
     'system_startup_notify' => [
         'type' => 'text',
-        'text' => "🤖 机器人已上线\n\n⏰ {time}"
+        'text' => "🤖 服务上线\n\n⏰ {time}"
     ],
 
-    // 充值通知模板 - 图片 + 简单文字
+    // 充值通知模板 - 改为GIF图片 + 简单文字
     'recharge_notify' => [
-        'type' => 'photo',
-        'image_url' => 'https://tgapi.oyim.top/static/default.png',
+        'type' => 'photo',  // 改为photo类型，GIF会自动循环播放
+        'image_url' => 'https://tgapi.oyim.top/static/recharge_success.gif',  // 充值成功GIF
         'caption' => "🎉 恭喜 {user_name} 成功充值 {money} USDT\n⏰ {create_time}"
     ],
 
-    // 提现通知模板 - 图片 + 简单文字
+    // 提现通知模板 - 改为GIF图片 + 简单文字
     'withdraw_notify' => [
-        'type' => 'photo',
-        'image_url' => 'https://tgapi.oyim.top/static/default.png', 
+        'type' => 'photo',  // 改为photo类型，GIF会自动循环播放
+        'image_url' => 'https://tgapi.oyim.top/static/withdraw_success.gif',  // 提现成功GIF
         'caption' => "💰 恭喜 {user_name} 成功提现 {money} USDT\n⏰ {create_time}"
     ],
 
-    // 红包通知模板 - 带抢红包按钮
+    // 红包通知模板 - 先发图片，再发文字和按钮（保持PNG）
     'redpacket_notify' => [
-        'type' => 'text_with_button',
+        'type' => 'photo_then_button',  // 🔧 只改这里：photo_and_text_with_button → photo_then_button
+        'image_url' => 'https://tgapi.oyim.top/static/redpacket_header.png',  // 红包顶部图片
         'text' => "🧧 {sender_name} 发了一个红包\n\n" .
                  "💵 总金额：{total_amount} USDT\n" .
                  "🎁 个数：{total_count}个\n" .
@@ -82,7 +83,18 @@ return [
         'thousands_separator' => ''
     ],
 
-    // 默认图片配置
+    // 默认媒体文件配置
+    'default_media' => [
+        // 默认GIF动图（充值提现改为GIF）
+        'recharge_gif' => 'https://tgapi.oyim.top/static/recharge_success.gif',
+        'withdraw_gif' => 'https://tgapi.oyim.top/static/withdraw_success.gif',
+        
+        // 默认图片（红包等保持PNG）
+        'redpacket_header' => 'https://tgapi.oyim.top/static/redpacket_header.png',
+        'advertisement' => 'https://tgapi.oyim.top/static/default.png'
+    ],
+
+    // 默认图片配置（保留兼容性）
     'default_images' => [
         'recharge' => 'https://tgapi.oyim.top/static/default.png',
         'withdraw' => 'https://tgapi.oyim.top/static/default.png',

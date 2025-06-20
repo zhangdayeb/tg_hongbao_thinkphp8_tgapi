@@ -33,7 +33,7 @@ return [
     // 外部链接配置
     'links' => [
         // 游戏相关
-        'game_url' => env('GAME_ENTRANCE_URL', 'http://www.cg888.vip'),
+        'game_url' => env('GAME_ENTRANCE_URL', 'https://t.me/cgvip_game_bot/cgvipgame'),
         'game_group_url' => env('GAME_GROUP_URL', 'https://t.me/CGvip88888'),
         
         // 客服相关
@@ -51,7 +51,7 @@ return [
     'withdraw' => [
         'min_amount' => 10.00,           // 最小提现金额
         'max_amount' => 10000.00,        // 最大提现金额
-        'fee_rate' => 0.02,              // 手续费率 2%
+        'fee_rate' => 0.01,              // 手续费率 1%
         'fee_min' => 1.00,               // 最小手续费
         'fee_max' => 100.00,             // 最大手续费
         'password_length' => 6,          // 密码长度
