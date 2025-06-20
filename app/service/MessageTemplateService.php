@@ -234,7 +234,7 @@ class MessageTemplateService
     }
     
     /**
-     * 设置默认值
+     * 设置默认值 - 修复版本
      */
     private function setDefaultValues(array $data): array
     {
@@ -250,14 +250,25 @@ class MessageTemplateService
         if (!isset($data['image_url']) || empty($data['image_url'])) {
             $defaultImages = config('notification_templates.default_images', []);
             
+            // 🔧 修复：确保 defaultImages 是数组
+            if (!is_array($defaultImages)) {
+                $defaultImages = [];
+            }
+            
             // 根据数据类型判断使用哪个默认图片
             if (isset($data['payment_method'])) {
                 $data['image_url'] = $defaultImages['recharge'] ?? '';
-            } elseif (isset($data['withdraw_address'])) {
+            } elseif (isset($data['user_id']) && !isset($data['payment_method'])) {
+                // 🔧 修复：改为判断是否有user_id但没有payment_method（提现的特征）
                 $data['image_url'] = $defaultImages['withdraw'] ?? '';
             } else {
                 $data['image_url'] = $defaultImages['advertisement'] ?? '';
             }
+        }
+        
+        // 🔧 最终保险：确保 image_url 一定存在
+        if (!isset($data['image_url'])) {
+            $data['image_url'] = '';
         }
         
         return $data;
