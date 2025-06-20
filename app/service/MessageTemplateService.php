@@ -24,6 +24,18 @@ class MessageTemplateService
             'caption' => $this->replaceVariables($template['caption'], $data)
         ];
     }
+
+    /**
+     * 🔧 新增：格式化动画模板（GIF动图）
+     */
+    private function formatAnimationTemplate(array $template, array $data): array
+    {
+        return [
+            'type' => 'animation',
+            'image_url' => $this->replaceVariables($template['image_url'], $data),
+            'caption' => $this->replaceVariables($template['caption'], $data)
+        ];
+    }
     
     /**
      * 格式化带按钮模板（红包）
@@ -329,8 +341,9 @@ class MessageTemplateService
             'errors' => $errors
         ];
     }
+
     /**
-     * 格式化模板
+     * 🔧 修复：格式化模板 - 添加 animation 类型支持
      */
     public function formatTemplate(array $template, array $data): array
     {
@@ -341,6 +354,7 @@ class MessageTemplateService
             // 根据模板类型处理
             return match($template['type']) {
                 'photo' => $this->formatPhotoTemplate($template, $processedData),
+                'animation' => $this->formatAnimationTemplate($template, $processedData), // 🔧 新增
                 'text_with_button' => $this->formatButtonTemplate($template, $processedData),
                 'photo_then_button' => $this->formatPhotoThenButtonTemplate($template, $processedData), // 新增
                 default => $this->formatTextTemplate($template, $processedData)
@@ -351,7 +365,6 @@ class MessageTemplateService
             throw $e;
         }
     }
-
 
     /**
      * 获取模板预览
