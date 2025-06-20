@@ -14,15 +14,15 @@ return [
 
     // 充值通知模板 - 改为GIF图片 + 简单文字
     'recharge_notify' => [
-        'type' => 'photo',  // 改为photo类型，GIF会自动循环播放
+        'type' => 'animation', // 从photo改为animation
         'image_url' => 'https://tgapi.oyim.top/static/recharge_success.gif',  // 充值成功GIF
         'caption' => "🎉 恭喜 {user_name} 成功充值 {money} USDT\n⏰ {create_time}"
     ],
 
     // 提现通知模板 - 改为GIF图片 + 简单文字
     'withdraw_notify' => [
-        'type' => 'photo',  // 改为photo类型，GIF会自动循环播放
-        'image_url' => 'https://tgapi.oyim.top/static/withdraw_success.gif',  // 提现成功GIF
+        'type' => 'animation', // 从photo改为animation
+        'image_url' => 'https://tgapi.oyim.top/static/withdraw_success2.gif',  // 提现成功GIF
         'caption' => "💰 恭喜 {user_name} 成功提现 {money} USDT\n⏰ {create_time}"
     ],
 
@@ -87,7 +87,7 @@ return [
     'default_media' => [
         // 默认GIF动图（充值提现改为GIF）
         'recharge_gif' => 'https://tgapi.oyim.top/static/recharge_success.gif',
-        'withdraw_gif' => 'https://tgapi.oyim.top/static/withdraw_success.gif',
+        'withdraw_gif' => 'https://tgapi.oyim.top/static/withdraw_success2.gif',
         
         // 默认图片（红包等保持PNG）
         'redpacket_header' => 'https://tgapi.oyim.top/static/redpacket_header.png',

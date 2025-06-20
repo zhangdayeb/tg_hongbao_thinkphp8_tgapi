@@ -135,6 +135,7 @@ class TelegramNotificationService
             // 根据模板类型发送消息
             $result = match($template['type']) {
                 'photo' => $this->sendPhoto($chatId, $messageContent),
+                'animation' => $this->sendAnimation($chatId, $messageContent), // 新增
                 'text_with_button' => $this->sendTextWithButton($chatId, $messageContent),
                 'photo_then_button' => $this->sendPhotoThenButton($chatId, $messageContent), // 新增
                 default => $this->sendText($chatId, $messageContent)
@@ -229,7 +230,20 @@ class TelegramNotificationService
         
         return $this->makeApiRequest('sendPhoto', $params);
     }
-    
+    /**
+     * 发送动画消息
+     */
+    private function sendAnimation(string $chatId, array $content): array
+    {
+        $params = [
+            'chat_id' => $chatId,
+            'animation' => $content['image_url'], // 注意这里用animation字段
+            'caption' => $content['caption'] ?? '',
+            'parse_mode' => null
+        ];
+        
+        return $this->makeApiRequest('sendAnimation', $params);
+    }
     /**
      * 发送带按钮的文本消息
      */
