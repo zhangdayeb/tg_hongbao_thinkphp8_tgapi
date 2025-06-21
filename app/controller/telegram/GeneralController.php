@@ -333,13 +333,23 @@ class GeneralController extends BaseTelegramController
     {
         if (self::$dbConfig === null) {
             try {
-                $config = Db::table('tg_bot_config')->order('id', 'asc')->find();
+                // 🎯 修复：使用正确的表名（不带前缀，系统自动添加）
+                $config = Db::name('tg_bot_config')->order('id', 'asc')->find();
+                
+                // 调试信息
+                $this->log('debug.log', "查询数据库配置: " . ($config ? '成功' : '失败'));
+                if ($config) {
+                    $this->log('debug.log', "配置内容: " . json_encode($config, JSON_UNESCAPED_UNICODE));
+                }
+                
                 if ($config) {
                     self::$dbConfig = $config;
                 } else {
                     self::$dbConfig = [];
                 }
             } catch (\Exception $e) {
+                // 调试信息
+                $this->log('debug.log', "数据库查询异常: " . $e->getMessage());
                 self::$dbConfig = [];
             }
         }
