@@ -10,19 +10,7 @@ return [
     // 通用消息模板
     'messages' => [
         // 欢迎消息
-        'welcome' => '🌟🌟 CG国际娱乐🌟🌟
-🎉诚挚欢迎您的驾临🎉
-💎💎  实体赌场直营   💎💎
-💎💎      支        持    💎💎
-💎💎  帝  豪  赌  场 💎💎
-💎💎  星  际  赌  场 💎💎
-💎💎  码  房  取  现 💎💎
-💎💎  无  需  实  名 💎💎
-💎💎注册即可游戏💎💎
-💰汇旺、U钱包、ABA充提💰
-👍安全可靠   大额无忧👍
-🎮真人/电子/棋牌/捕鱼🎮
-🔥丰厚大奖，等您来赢🔥',
+        'welcome' => '[welcome]',
 
         // 帮助信息
         'help' => '🤖 *CG国际娱乐机器人帮助*
@@ -66,10 +54,10 @@ return [
         // 主菜单键盘 - 唯一真正通用的键盘
         'main_menu' => [
             [
-                ['text' => '🌟开始CG国际娱乐在线游戏🔥', 'url' => '{game_url}']
+                ['text' => '[button1_name]', 'url' => '[button1_url]']
             ],
             [
-                ['text' => '✅官方游戏入群✅', 'url' => '{game_group_url}']
+                ['text' => '[button2_name]', 'url' => '[button2_url]']
             ],
             [
                 ['text' => '🎰唯一客服', 'url' => '{customer_service_url}'],
@@ -84,10 +72,10 @@ return [
                 ['text' => '💸提现', 'callback_data' => 'withdraw']
             ],
             [
-                ['text' => '✅官方频道', 'url' => '{official_channel_url}'],
-                ['text' => '🎁包赢文化', 'url' => '{win_culture_url}'],
-                ['text' => '🤝每日吃瓜', 'url' => '{daily_news_url}'],
-                ['text' => '📢今日头条', 'url' => '{today_headlines_url}']
+                ['text' => '[button3_name]', 'url' => '[button3_url]'],
+                ['text' => '[button4_name]', 'url' => '[button4_url]'],
+                ['text' => '[button5_name]', 'url' => '[button5_url]'],
+                ['text' => '[button6_name]', 'url' => '[button6_url]']
             ]
         ],
 
