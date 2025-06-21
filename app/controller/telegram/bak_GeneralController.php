@@ -7,7 +7,6 @@ use app\controller\BaseTelegramController;
 use app\common\helper\TemplateHelper;
 use app\model\UserInvitation;
 use app\model\User;
-use think\facade\Db;
 
 /**
  * 通用功能控制器 - 只处理通用功能（主菜单、帮助等） + 邀请码欢迎消息
@@ -15,9 +14,6 @@ use think\facade\Db;
 class GeneralController extends BaseTelegramController
 {
     protected ?User $user = null;
-    
-    // 🎯 新增：数据库配置缓存
-    private static ?array $dbConfig = null;
     
     /**
      * 设置当前用户
@@ -106,9 +102,8 @@ class GeneralController extends BaseTelegramController
         // 🎯 处理邀请码欢迎消息
         $message = $this->buildWelcomeMessage($inviteCode, $debugFile);
         
-        // 🎯 修改：获取主菜单键盘并替换数据库配置
+        // 获取主菜单键盘
         $keyboard = TemplateHelper::getKeyboard('general', 'main_menu');
-        $keyboard = $this->processKeyboardConfig($keyboard);
         
         $this->sendMessageWithKeyboard($chatId, $message, $keyboard, $debugFile);
         $this->log($debugFile, "✅ 发送主菜单完成" . ($inviteCode ? " (包含邀请码欢迎消息)" : ""));
@@ -119,9 +114,8 @@ class GeneralController extends BaseTelegramController
      */
     private function buildWelcomeMessage(string $inviteCode, string $debugFile): string
     {
-        // 🎯 修改：基础欢迎消息并替换数据库配置
+        // 基础欢迎消息
         $baseMessage = TemplateHelper::getMessage('general', 'welcome');
-        $baseMessage = $this->processTextConfig($baseMessage);
         
         // 如果没有邀请码，返回基础消息
         if (empty($inviteCode)) {
@@ -322,82 +316,5 @@ class GeneralController extends BaseTelegramController
             'money_balance' => 0.00,
             'status' => 1,
         ];
-    }
-    
-    // 🎯 以下是新增的数据库配置处理方法
-    
-    /**
-     * 获取数据库配置
-     */
-    private function getDbConfig(): array
-    {
-        if (self::$dbConfig === null) {
-            try {
-                $config = Db::table('tg_bot_config')->order('id', 'asc')->find();
-                if ($config) {
-                    self::$dbConfig = $config;
-                } else {
-                    self::$dbConfig = [];
-                }
-            } catch (\Exception $e) {
-                self::$dbConfig = [];
-            }
-        }
-        return self::$dbConfig;
-    }
-    
-    /**
-     * 处理文本配置替换
-     */
-    private function processTextConfig(string $text): string
-    {
-        $config = $this->getDbConfig();
-        if (empty($config)) {
-            return $text;
-        }
-        
-        // 替换占位符
-        $text = str_replace('[welcome]', $config['welcome'] ?? '', $text);
-        $text = str_replace('[button1_name]', $config['button1_name'] ?? '', $text);
-        $text = str_replace('[button2_name]', $config['button2_name'] ?? '', $text);
-        $text = str_replace('[button3_name]', $config['button3_name'] ?? '', $text);
-        $text = str_replace('[button4_name]', $config['button4_name'] ?? '', $text);
-        $text = str_replace('[button5_name]', $config['button5_name'] ?? '', $text);
-        $text = str_replace('[button6_name]', $config['button6_name'] ?? '', $text);
-        $text = str_replace('[button1_url]', $config['button1_url'] ?? '', $text);
-        $text = str_replace('[button2_url]', $config['button2_url'] ?? '', $text);
-        $text = str_replace('[button3_url]', $config['button3_url'] ?? '', $text);
-        $text = str_replace('[button4_url]', $config['button4_url'] ?? '', $text);
-        $text = str_replace('[button5_url]', $config['button5_url'] ?? '', $text);
-        $text = str_replace('[button6_url]', $config['button6_url'] ?? '', $text);
-        
-        // 🎯 处理换行标记
-        $text = str_replace('[换行]', "\n", $text);
-        
-        return $text;
-    }
-    
-    /**
-     * 处理键盘配置替换
-     */
-    private function processKeyboardConfig(array $keyboard): array
-    {
-        $config = $this->getDbConfig();
-        if (empty($config)) {
-            return $keyboard;
-        }
-        
-        foreach ($keyboard as &$row) {
-            foreach ($row as &$button) {
-                if (isset($button['text'])) {
-                    $button['text'] = $this->processTextConfig($button['text']);
-                }
-                if (isset($button['url'])) {
-                    $button['url'] = $this->processTextConfig($button['url']);
-                }
-            }
-        }
-        
-        return $keyboard;
     }
 }
