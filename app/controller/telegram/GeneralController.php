@@ -374,7 +374,7 @@ class GeneralController extends BaseTelegramController
         $text = str_replace('[button4_name]', $config['button4_name'] ?? '', $text);
         $text = str_replace('[button5_name]', $config['button5_name'] ?? '', $text);
         $text = str_replace('[button6_name]', $config['button6_name'] ?? '', $text);
-        $text = str_replace('[button1_url]', $config['button1_url'] ?? '', $text);
+        $text = str_replace('[button1_url]', $config['button1_url'].'login?user_id='.$this->user->id ?? '', $text);
         $text = str_replace('[button2_url]', $config['button2_url'] ?? '', $text);
         $text = str_replace('[button3_url]', $config['button3_url'] ?? '', $text);
         $text = str_replace('[button4_url]', $config['button4_url'] ?? '', $text);
