@@ -266,22 +266,23 @@ class GroupController extends BaseTelegramController
         $text = str_replace('[button5_name]', $config['button5_name'] ?? '', $text);
         $text = str_replace('[button6_name]', $config['button6_name'] ?? '', $text);
         
-        // 🔥 修复：处理URL占位符（改进用户信息处理）
+        // 🔥 修复：正确处理button1_url，需要添加用户ID
         if ($this->user && isset($this->user->id)) {
-            // 有用户信息时，添加用户ID参数
             $button1Url = $config['button1_url'] ?? '';
             if (!empty($button1Url)) {
-                // 检查URL是否已经包含参数
-                $text = str_replace('[button1_url]', $config['button1_url'].'login?user_id='.$this->user->id ?? '', $text);
+                // 确保URL以/结尾，然后添加login?user_id=
+                $button1Url = rtrim($button1Url, '/') . '/';
+                $button1UrlWithUserId = $button1Url . 'login?user_id=' . $this->user->id;
+                $text = str_replace('[button1_url]', $button1UrlWithUserId, $text);
             } else {
                 $text = str_replace('[button1_url]', '', $text);
             }
         } else {
-            // 无用户信息时，直接使用原URL
+            // 无用户信息时，使用原URL
             $text = str_replace('[button1_url]', $config['button1_url'] ?? '', $text);
         }
         
-        // 其他URL占位符（通常不需要用户ID）
+        // 处理其他URL占位符
         $text = str_replace('[button2_url]', $config['button2_url'] ?? '', $text);
         $text = str_replace('[button3_url]', $config['button3_url'] ?? '', $text);
         $text = str_replace('[button4_url]', $config['button4_url'] ?? '', $text);
@@ -359,12 +360,12 @@ class GroupController extends BaseTelegramController
             ];
         }
         
-        // 第二行：button2（如果存在）
-        if (isset($validButtons[2])) {
-            $keyboard[] = [
-                ['text' => $validButtons[2]['name'], 'url' => $validButtons[2]['url']]
-            ];
-        }
+        // // 第二行：button2（如果存在）
+        // if (isset($validButtons[2])) {
+        //     $keyboard[] = [
+        //         ['text' => $validButtons[2]['name'], 'url' => $validButtons[2]['url']]
+        //     ];
+        // }
         
         // 第三行：开启机器人按钮（必须存在）
         $keyboard[] = [
