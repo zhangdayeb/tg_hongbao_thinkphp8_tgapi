@@ -104,8 +104,8 @@ class CommandDispatcher extends BaseTelegramController
             // 🔥 群聊过滤逻辑：只允许 /start 和红包相关命令
             if (in_array($chatType, ['group', 'supergroup'])) {
                 if (strpos($text, '/start') === 0) {
-                    // 🆕 群聊中的 /start 命令 - 直接调用 GroupController
-                    $this->handleGroupStart($chatId, $debugFile);
+                    // 🆕 群聊中的 /start 命令 - 直接调用 GroupController（修复：传递用户信息）
+                    $this->handleGroupStart($chatId, $update, $debugFile);
                     return;
                 } elseif ($this->isRedPacketCommand($text) || strpos($text, '/') === 0) {
                     // 红包命令允许通过，其他斜杠命令检查是否为红包相关
@@ -143,6 +143,38 @@ class CommandDispatcher extends BaseTelegramController
             
         } catch (\Exception $e) {
             $this->handleException($e, "处理文本消息", $debugFile);
+        }
+    }
+
+    /**
+     * 🆕 处理群聊 /start 命令 - 修复：传递用户信息
+     */
+    private function handleGroupStart(int $chatId, array $update, string $debugFile): void
+    {
+        try {
+            $this->log($debugFile, "🚀 调度群聊/start命令到GroupController - ChatID: {$chatId}");
+            
+            // 🔥 修复：先获取用户信息
+            $user = $this->ensureUserExists($update, $debugFile);
+            
+            $groupController = new GroupController();
+            
+            // 🔥 修复：传递用户信息给GroupController
+            if ($user) {
+                $groupController->setUser($user);
+                $this->log($debugFile, "✅ 用户信息已传递给GroupController - UserID: {$user->id}");
+            } else {
+                $this->log($debugFile, "⚠️ 未能获取用户信息，继续使用GroupController无用户模式");
+            }
+            
+            $groupController->handleStartCommand($chatId, $debugFile);
+            
+            $this->log($debugFile, "✅ 群聊/start命令处理完成");
+            
+        } catch (\Exception $e) {
+            $this->log($debugFile, "❌ 调度群聊/start命令异常: " . $e->getMessage());
+            // 如果GroupController失败，发送简单消息
+            $this->sendMessage($chatId, "❌ 服务暂时不可用，请稍后重试", $debugFile);
         }
     }
 
@@ -196,25 +228,6 @@ class CommandDispatcher extends BaseTelegramController
         }
     }
 
-    /**
-     * 🆕 处理群聊 /start 命令 - 简化为直接调用 GroupController
-     */
-    private function handleGroupStart(int $chatId, string $debugFile): void
-    {
-        try {
-            $this->log($debugFile, "🚀 调度群聊/start命令到GroupController - ChatID: {$chatId}");
-            
-            $groupController = new GroupController();
-            $groupController->handleStartCommand($chatId, $debugFile);
-            
-            $this->log($debugFile, "✅ 群聊/start命令处理完成");
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 调度群聊/start命令异常: " . $e->getMessage());
-            // 如果GroupController失败，发送简单消息
-            $this->sendMessage($chatId, "❌ 服务暂时不可用，请稍后重试", $debugFile);
-        }
-    }
 
     /**
      * 🆕 检查是否是红包相关回调

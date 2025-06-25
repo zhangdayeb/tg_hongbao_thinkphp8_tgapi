@@ -104,110 +104,7 @@ class GroupController extends BaseTelegramController
         return $message;
     }
     
-    /**
-     * 构建键盘
-     */
-    private function buildKeyboard(string $privateLink): array
-    {
-        $config = $this->getDbConfig();
-        $keyboard = [];
-        $excludeKeywords = ['个人中心', '邀请', '充值', '提现', '余额', '账户'];
-        
-        // 获取有效的配置按钮
-        $validButtons = [];
-        for ($i = 1; $i <= 6; $i++) {
-            $nameKey = "button{$i}_name";
-            $urlKey = "button{$i}_url";
-            
-            $buttonName = $config[$nameKey] ?? '';
-            $buttonUrl = $config[$urlKey] ?? '';
-            
-            // 跳过空按钮
-            if (empty($buttonName) || empty($buttonUrl)) {
-                continue;
-            }
-            
-            // 过滤不适合群聊的按钮
-            $shouldExclude = false;
-            foreach ($excludeKeywords as $keyword) {
-                if (strpos($buttonName, $keyword) !== false) {
-                    $shouldExclude = true;
-                    break;
-                }
-            }
-            
-            if (!$shouldExclude) {
-                // 处理URL中的占位符
-                $processedUrl = $this->processTextConfig($buttonUrl);
-                $validButtons[$i] = [
-                    'name' => $buttonName,
-                    'url' => $processedUrl
-                ];
-            }
-        }
-        
-        // 第一行：button1（如果存在）
-        if (isset($validButtons[1])) {
-            $keyboard[] = [
-                ['text' => $validButtons[1]['name'], 'url' => $validButtons[1]['url']]
-            ];
-        }
-        
-        // 第二行：button2（如果存在）
-        if (isset($validButtons[2])) {
-            $keyboard[] = [
-                ['text' => $validButtons[2]['name'], 'url' => $validButtons[2]['url']]
-            ];
-        }
-        
-        // 第三行：开启机器人按钮（必须存在）
-        $keyboard[] = [
-            ['text' => '💬 开启机器人', 'url' => $privateLink]
-        ];
-        
-        // 第四行：唯一客服 + 唯一财务（从配置文件读取）
-        $serviceUrl = config('telegram.links.customer_service_url', '');
-        $financeUrl = config('telegram.links.finance_service_url', '');
-        
-        $serviceRow = [];
-        if (!empty($serviceUrl)) {
-            $serviceRow[] = ['text' => '👨‍💼 唯一客服', 'url' => $serviceUrl];
-        }
-        if (!empty($financeUrl)) {
-            $serviceRow[] = ['text' => '💰 唯一财务', 'url' => $financeUrl];
-        }
-        
-        if (!empty($serviceRow)) {
-            $keyboard[] = $serviceRow;
-        }
-        
-        // 第五行：button3 + button4（如果存在）
-        $row5 = [];
-        if (isset($validButtons[3])) {
-            $row5[] = ['text' => $validButtons[3]['name'], 'url' => $validButtons[3]['url']];
-        }
-        if (isset($validButtons[4])) {
-            $row5[] = ['text' => $validButtons[4]['name'], 'url' => $validButtons[4]['url']];
-        }
-        if (!empty($row5)) {
-            $keyboard[] = $row5;
-        }
-        
-        // 第六行：button5 + button6（如果存在）
-        $row6 = [];
-        if (isset($validButtons[5])) {
-            $row6[] = ['text' => $validButtons[5]['name'], 'url' => $validButtons[5]['url']];
-        }
-        if (isset($validButtons[6])) {
-            $row6[] = ['text' => $validButtons[6]['name'], 'url' => $validButtons[6]['url']];
-        }
-        if (!empty($row6)) {
-            $keyboard[] = $row6;
-        }
-        
-        return $keyboard;
-    }
-    
+   
     
     /**
      * 发送使用帮助
@@ -369,13 +266,22 @@ class GroupController extends BaseTelegramController
         $text = str_replace('[button5_name]', $config['button5_name'] ?? '', $text);
         $text = str_replace('[button6_name]', $config['button6_name'] ?? '', $text);
         
-        // 处理URL占位符（如果有用户信息）
-        if ($this->user) {
-            $text = str_replace('[button1_url]', ($config['button1_url'] ?? '') . 'login?user_id=' . $this->user->id, $text);
+        // 🔥 修复：处理URL占位符（改进用户信息处理）
+        if ($this->user && isset($this->user->id)) {
+            // 有用户信息时，添加用户ID参数
+            $button1Url = $config['button1_url'] ?? '';
+            if (!empty($button1Url)) {
+                // 检查URL是否已经包含参数
+                $text = str_replace('[button1_url]', $config['button1_url'].'login?user_id='.$this->user->id ?? '', $text);
+            } else {
+                $text = str_replace('[button1_url]', '', $text);
+            }
         } else {
+            // 无用户信息时，直接使用原URL
             $text = str_replace('[button1_url]', $config['button1_url'] ?? '', $text);
         }
         
+        // 其他URL占位符（通常不需要用户ID）
         $text = str_replace('[button2_url]', $config['button2_url'] ?? '', $text);
         $text = str_replace('[button3_url]', $config['button3_url'] ?? '', $text);
         $text = str_replace('[button4_url]', $config['button4_url'] ?? '', $text);
@@ -387,4 +293,126 @@ class GroupController extends BaseTelegramController
         
         return $text;
     }
+
+    /**
+     * 构建键盘 - 修复：改进用户信息处理
+     */
+    private function buildKeyboard(string $privateLink): array
+    {
+        $config = $this->getDbConfig();
+        $keyboard = [];
+        $excludeKeywords = ['个人中心', '邀请', '充值', '提现', '余额', '账户'];
+        
+        // 获取有效的配置按钮
+        $validButtons = [];
+        for ($i = 1; $i <= 6; $i++) {
+            $nameKey = "button{$i}_name";
+            $urlKey = "button{$i}_url";
+            
+            $buttonName = $config[$nameKey] ?? '';
+            $buttonUrl = $config[$urlKey] ?? '';
+            
+            // 跳过空按钮
+            if (empty($buttonName) || empty($buttonUrl)) {
+                continue;
+            }
+            
+            // 过滤不适合群聊的按钮
+            $shouldExclude = false;
+            foreach ($excludeKeywords as $keyword) {
+                if (strpos($buttonName, $keyword) !== false) {
+                    $shouldExclude = true;
+                    break;
+                }
+            }
+            
+            if (!$shouldExclude) {
+                // 🔥 修复：改进URL处理，特别是button1需要用户ID
+                if ($i === 1 && $this->user && isset($this->user->id)) {
+                    // button1需要用户ID参数
+                    $separator = strpos($buttonUrl, '?') !== false ? '&' : '?';
+                    $processedUrl = $buttonUrl . $separator . 'user_id=' . $this->user->id;
+                } else {
+                    // 其他按钮使用原URL（可能包含其他占位符）
+                    $processedUrl = $this->processTextConfig($buttonUrl);
+                }
+                
+                $validButtons[$i] = [
+                    'name' => $buttonName,
+                    'url' => $processedUrl
+                ];
+            }
+        }
+        
+        // 🔥 添加调试日志
+        if ($this->user) {
+            $this->log('debug.log', "GroupController 有用户信息 - UserID: {$this->user->id}");
+        } else {
+            $this->log('debug.log', "GroupController 无用户信息");
+        }
+        $this->log('debug.log', "有效按钮数量: " . count($validButtons));
+        
+        // 第一行：button1（如果存在）
+        if (isset($validButtons[1])) {
+            $keyboard[] = [
+                ['text' => $validButtons[1]['name'], 'url' => $validButtons[1]['url']]
+            ];
+        }
+        
+        // 第二行：button2（如果存在）
+        if (isset($validButtons[2])) {
+            $keyboard[] = [
+                ['text' => $validButtons[2]['name'], 'url' => $validButtons[2]['url']]
+            ];
+        }
+        
+        // 第三行：开启机器人按钮（必须存在）
+        $keyboard[] = [
+            ['text' => '💬 开启机器人', 'url' => $privateLink]
+        ];
+        
+        // 第四行：唯一客服 + 唯一财务（从配置文件读取）
+        $serviceUrl = config('telegram.links.customer_service_url', '');
+        $financeUrl = config('telegram.links.finance_service_url', '');
+        
+        $serviceRow = [];
+        if (!empty($serviceUrl)) {
+            $serviceRow[] = ['text' => '👨‍💼 唯一客服', 'url' => $serviceUrl];
+        }
+        if (!empty($financeUrl)) {
+            $serviceRow[] = ['text' => '💰 唯一财务', 'url' => $financeUrl];
+        }
+        
+        if (!empty($serviceRow)) {
+            $keyboard[] = $serviceRow;
+        }
+        
+        // 第五行：button3 + button4（如果存在）
+        $row5 = [];
+        if (isset($validButtons[3])) {
+            $row5[] = ['text' => $validButtons[3]['name'], 'url' => $validButtons[3]['url']];
+        }
+        if (isset($validButtons[4])) {
+            $row5[] = ['text' => $validButtons[4]['name'], 'url' => $validButtons[4]['url']];
+        }
+        if (!empty($row5)) {
+            $keyboard[] = $row5;
+        }
+        
+        // 第六行：button5 + button6（如果存在）
+        $row6 = [];
+        if (isset($validButtons[5])) {
+            $row6[] = ['text' => $validButtons[5]['name'], 'url' => $validButtons[5]['url']];
+        }
+        if (isset($validButtons[6])) {
+            $row6[] = ['text' => $validButtons[6]['name'], 'url' => $validButtons[6]['url']];
+        }
+        if (!empty($row6)) {
+            $keyboard[] = $row6;
+        }
+        
+        return $keyboard;
+    }
+
+
 }
