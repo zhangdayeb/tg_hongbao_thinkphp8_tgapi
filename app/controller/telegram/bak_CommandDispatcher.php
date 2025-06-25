@@ -83,8 +83,7 @@ class CommandDispatcher extends BaseTelegramController
     ];
     
     /**
-     * 处理文本消息 - 支持群聊红包功能版本
-     * 群聊中允许：/start、发红包命令
+     * 处理文本消息
      */
     public function handleMessage(array $update, string $debugFile): void
     {
@@ -94,35 +93,8 @@ class CommandDispatcher extends BaseTelegramController
             $text = $message['text'] ?? '';
             
             $chatContext = $this->extractChatContext($message);
-            $chatType = $chatContext['chat_type'];
+            $this->log($debugFile, "收到消息 - ChatID: {$chatId}, Type: {$chatContext['chat_type']}, 内容: {$text}");
             
-            $this->log($debugFile, "收到消息 - ChatID: {$chatId}, Type: {$chatType}, 内容: {$text}");
-            
-            // 🔥 群聊过滤逻辑：只允许 /start 和红包相关命令
-            if (in_array($chatType, ['group', 'supergroup'])) {
-                if (strpos($text, '/start') === 0) {
-                    // 群聊中的 /start 命令 - 引导用户开启私聊
-                    $this->handleGroupStartCommand($chatId, $debugFile);
-                    return;
-                } elseif ($this->isRedPacketCommand($text) || strpos($text, '/') === 0) {
-                    // 红包命令允许通过，其他斜杠命令检查是否为红包相关
-                    if (strpos($text, '/') === 0) {
-                        $command = $this->parseCommand($text);
-                        if (!$this->isRedPacketCommand($command)) {
-                            // 非红包命令静默处理
-                            $this->log($debugFile, "群聊中非红包命令，静默处理: {$command}");
-                            return;
-                        }
-                    }
-                    // 红包命令继续处理
-                } else {
-                    // 其他文本消息完全静默，直接返回
-                    $this->log($debugFile, "群聊中非红包文本，静默处理");
-                    return;
-                }
-            }
-            
-            // 私聊中正常处理所有消息，群聊中只处理红包相关消息
             if (strpos($text, '/') === 0) {
                 // 命令处理
                 $invitationCode = $this->extractInvitationCode($text);
@@ -142,10 +114,11 @@ class CommandDispatcher extends BaseTelegramController
             $this->handleException($e, "处理文本消息", $debugFile);
         }
     }
-
+    
+    
+    
     /**
-     * 处理回调查询 - 支持群聊红包功能版本
-     * 群聊中允许：红包相关按钮点击
+     * 处理回调查询 - 修复版本
      */
     public function handleCallback(array $update, string $debugFile): void
     {
@@ -156,24 +129,8 @@ class CommandDispatcher extends BaseTelegramController
             $queryId = $callbackQuery['id'] ?? '';
             
             $chatContext = $this->extractChatContext($callbackQuery['message']);
-            $chatType = $chatContext['chat_type'];
+            $this->log($debugFile, "收到回调 - ChatID: {$chatId}, 数据: {$callbackData}, QueryID: {$queryId}");
             
-            $this->log($debugFile, "收到回调 - ChatID: {$chatId}, Type: {$chatType}, 数据: {$callbackData}, QueryID: {$queryId}");
-            
-            // 🔥 群聊回调过滤：只允许红包相关回调
-            if (in_array($chatType, ['group', 'supergroup'])) {
-                if ($this->isRedPacketCallback($callbackData)) {
-                    // 红包相关回调允许通过
-                    $this->log($debugFile, "群聊红包回调允许处理: {$callbackData}");
-                } else {
-                    // 非红包回调静默处理
-                    $this->safeAnswerCallbackQuery($queryId, null, $debugFile);
-                    $this->log($debugFile, "群聊非红包回调静默处理: {$callbackData}");
-                    return;
-                }
-            }
-            
-            // 私聊中正常处理回调，群聊中只处理红包回调
             // 安全回调响应
             $this->safeAnswerCallbackQuery($queryId, null, $debugFile);
             
@@ -185,157 +142,11 @@ class CommandDispatcher extends BaseTelegramController
             $user = $this->ensureUserExists($update, $debugFile);
             if (!$user) return;
             
-            // 传递 queryId 给回调分发方法
+            // 🔥 修复：传递 queryId 给回调分发方法
             $this->dispatchCallback($callbackData, $chatId, $user, $chatContext, $debugFile, $queryId);
             
         } catch (\Exception $e) {
             $this->handleException($e, "处理回调查询", $debugFile);
-        }
-    }
-
-    /**
-     * 🆕 检查是否是红包相关回调
-     */
-    private function isRedPacketCallback(string $callbackData): bool
-    {
-        // 红包相关的回调数据前缀
-        $redPacketCallbacks = [
-            'grab_redpacket_',      // 抢红包
-            'redpacket_detail_',    // 红包详情
-            'refresh_redpacket_',   // 刷新红包
-            'redpacket',            // 红包菜单
-            'send_red_packet',      // 发红包
-            'red_packet_history',   // 红包记录
-            'confirm_send_redpacket', // 确认发红包
-            'cancel_send_redpacket',  // 取消发红包
-            'usage_help',           // 使用帮助（群聊/start命令中的按钮）
-        ];
-        
-        foreach ($redPacketCallbacks as $prefix) {
-            if (str_starts_with($callbackData, $prefix) || $callbackData === $prefix) {
-                return true;
-            }
-        }
-        
-        return false;
-    }
-    
-    /**
-     * 🆕 处理群聊中的 /start 命令 - 引导用户开启私聊
-     */
-    private function handleGroupStartCommand(int $chatId, string $debugFile): void
-    {
-        try {
-            $this->log($debugFile, "🚀 处理群聊/start命令 - ChatID: {$chatId}");
-            
-            // 获取机器人用户名（从配置或缓存获取）
-            $botUsername = $this->getBotUsername($debugFile);
-            
-            if (empty($botUsername)) {
-                $this->log($debugFile, "❌ 无法获取机器人用户名，发送通用引导消息");
-                $this->sendGroupStartFallbackMessage($chatId, $debugFile);
-                return;
-            }
-            
-            // 生成私聊链接，带群组来源参数
-            $privateLink = "https://t.me/{$botUsername}?start=group_" . abs($chatId);
-            
-            // 构建引导消息
-            $message = "👋 *欢迎使用机器人！*\n\n" .
-                    "🔐 *为了更好的体验，所有功能都需要在私聊中使用*\n\n" .
-                    "✨ *私聊功能包括：*\n" .
-                    "• 🧧 红包功能\n" .
-                    "• 💰 充值提现\n" .
-                    "• 👤 个人中心\n" .
-                    "• 📊 数据查询\n\n" .
-                    "👆 *点击下方按钮开启私聊对话*";
-            
-            // 构建键盘
-            $keyboard = [
-                [
-                    ['text' => '💬 开启私聊', 'url' => $privateLink]
-                ],
-                [
-                    ['text' => '❓ 如何使用', 'callback_data' => 'usage_help']
-                ]
-            ];
-            
-            $this->sendMessageWithKeyboard($chatId, $message, $keyboard, $debugFile);
-            $this->log($debugFile, "✅ 群聊引导消息发送完成");
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 处理群聊/start命令异常: " . $e->getMessage());
-            $this->sendGroupStartFallbackMessage($chatId, $debugFile);
-        }
-    }
-
-    /**
-     * 🆕 获取机器人用户名
-     */
-    private function getBotUsername(string $debugFile): string
-    {
-        try {
-            // 优先从配置文件获取
-            $botUsername = config('telegram.bot_username', '');
-            if (!empty($botUsername)) {
-                $this->log($debugFile, "✅ 从配置获取到机器人用户名: {$botUsername}");
-                return $botUsername;
-            }
-            
-            // 从缓存获取
-            $cacheKey = 'telegram_bot_username';
-            $cachedUsername = cache($cacheKey);
-            if (!empty($cachedUsername)) {
-                $this->log($debugFile, "✅ 从缓存获取到机器人用户名: {$cachedUsername}");
-                return $cachedUsername;
-            }
-            
-            // 通过API获取并缓存
-            $telegramService = new \app\service\TelegramService();
-            $botInfo = $telegramService->getMe();
-            
-            if ($botInfo['code'] === 200 && !empty($botInfo['data']['username'])) {
-                $username = $botInfo['data']['username'];
-                // 缓存1小时
-                cache($cacheKey, $username, 3600);
-                $this->log($debugFile, "✅ 通过API获取并缓存机器人用户名: {$username}");
-                return $username;
-            }
-            
-            $this->log($debugFile, "❌ 无法获取机器人用户名");
-            return '';
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 获取机器人用户名异常: " . $e->getMessage());
-            return '';
-        }
-    }
-
-    /**
-     * 🆕 发送群聊启动备用消息（当无法获取机器人用户名时）
-     */
-    private function sendGroupStartFallbackMessage(int $chatId, string $debugFile): void
-    {
-        try {
-            $message = "👋 *欢迎使用机器人！*\n\n" .
-                    "🔐 *所有功能需要在私聊中使用*\n\n" .
-                    "📱 *如何开启私聊：*\n" .
-                    "1️⃣ 点击机器人头像\n" .
-                    "2️⃣ 选择\"发送消息\"\n" .
-                    "3️⃣ 发送 /start 开始使用\n\n" .
-                    "💡 *或者直接搜索机器人名称，发起私聊*";
-            
-            $keyboard = [
-                [
-                    ['text' => '❓ 使用帮助', 'callback_data' => 'usage_help']
-                ]
-            ];
-            
-            $this->sendMessageWithKeyboard($chatId, $message, $keyboard, $debugFile);
-            $this->log($debugFile, "✅ 群聊备用引导消息发送完成");
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 发送群聊备用消息异常: " . $e->getMessage());
         }
     }
     
