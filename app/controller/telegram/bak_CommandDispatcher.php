@@ -8,8 +8,8 @@ use app\service\UserService;
 use app\model\User;
 
 /**
- * Telegram命令分发器 - 精简版
- * 专注于调度，具体处理交给专门的控制器
+ * Telegram命令分发器 - 优化版
+ * 与RedPacketController完全匹配，减少冗余代码
  */
 class CommandDispatcher extends BaseTelegramController
 {
@@ -53,7 +53,7 @@ class CommandDispatcher extends BaseTelegramController
         'recharge' => PaymentController::class,
         'recharge_usdt' => PaymentController::class,
         'recharge_huiwang' => PaymentController::class,
-        'recharge_aba' => PaymentController::class,
+        'recharge_aba' => PaymentController::class,  // 👈 添加这一行
         'confirm_amount' => PaymentController::class,
         'copy_address' => PaymentController::class,
         'copy_account' => PaymentController::class,
@@ -65,8 +65,8 @@ class CommandDispatcher extends BaseTelegramController
         'set_withdraw_password' => WithdrawController::class,
         'bind_usdt_address' => WithdrawController::class,
         'confirm_withdraw' => WithdrawController::class,
-        'cancel_withdraw' => WithdrawController::class,
-        'retry_withdraw' => WithdrawController::class,
+        'cancel_withdraw' => WithdrawController::class,      // 👈 添加这个
+        'retry_withdraw' => WithdrawController::class,       // 👈 添加这个
         'withdraw_history' => WithdrawController::class,
         'modify_address' => WithdrawController::class,
         'invite' => InviteController::class,
@@ -80,9 +80,6 @@ class CommandDispatcher extends BaseTelegramController
         'cancel_send_redpacket' => RedPacketController::class,
         'game' => GameController::class,
         'service' => ServiceController::class,
-        // 🆕 群聊相关回调
-        'usage_help' => GroupController::class,
-        'back_to_group_start' => GroupController::class,
     ];
     
     /**
@@ -104,8 +101,8 @@ class CommandDispatcher extends BaseTelegramController
             // 🔥 群聊过滤逻辑：只允许 /start 和红包相关命令
             if (in_array($chatType, ['group', 'supergroup'])) {
                 if (strpos($text, '/start') === 0) {
-                    // 🆕 群聊中的 /start 命令 - 直接调用 GroupController
-                    $this->handleGroupStart($chatId, $debugFile);
+                    // 群聊中的 /start 命令 - 引导用户开启私聊
+                    $this->handleGroupStartCommand($chatId, $debugFile);
                     return;
                 } elseif ($this->isRedPacketCommand($text) || strpos($text, '/') === 0) {
                     // 红包命令允许通过，其他斜杠命令检查是否为红包相关
@@ -197,26 +194,6 @@ class CommandDispatcher extends BaseTelegramController
     }
 
     /**
-     * 🆕 处理群聊 /start 命令 - 简化为直接调用 GroupController
-     */
-    private function handleGroupStart(int $chatId, string $debugFile): void
-    {
-        try {
-            $this->log($debugFile, "🚀 调度群聊/start命令到GroupController - ChatID: {$chatId}");
-            
-            $groupController = new GroupController();
-            $groupController->handleStartCommand($chatId, $debugFile);
-            
-            $this->log($debugFile, "✅ 群聊/start命令处理完成");
-            
-        } catch (\Exception $e) {
-            $this->log($debugFile, "❌ 调度群聊/start命令异常: " . $e->getMessage());
-            // 如果GroupController失败，发送简单消息
-            $this->sendMessage($chatId, "❌ 服务暂时不可用，请稍后重试", $debugFile);
-        }
-    }
-
-    /**
      * 🆕 检查是否是红包相关回调
      */
     private function isRedPacketCallback(string $callbackData): bool
@@ -232,8 +209,6 @@ class CommandDispatcher extends BaseTelegramController
             'confirm_send_redpacket', // 确认发红包
             'cancel_send_redpacket',  // 取消发红包
             'usage_help',           // 使用帮助（群聊/start命令中的按钮）
-            'back_to_group_start',  // 🆕 返回群聊开始
-            'back_to_group_start',  // 🆕 返回群聊开始
         ];
         
         foreach ($redPacketCallbacks as $prefix) {
@@ -243,6 +218,125 @@ class CommandDispatcher extends BaseTelegramController
         }
         
         return false;
+    }
+    
+    /**
+     * 🆕 处理群聊中的 /start 命令 - 引导用户开启私聊
+     */
+    private function handleGroupStartCommand(int $chatId, string $debugFile): void
+    {
+        try {
+            $this->log($debugFile, "🚀 处理群聊/start命令 - ChatID: {$chatId}");
+            
+            // 获取机器人用户名（从配置或缓存获取）
+            $botUsername = $this->getBotUsername($debugFile);
+            
+            if (empty($botUsername)) {
+                $this->log($debugFile, "❌ 无法获取机器人用户名，发送通用引导消息");
+                $this->sendGroupStartFallbackMessage($chatId, $debugFile);
+                return;
+            }
+            
+            // 生成私聊链接，带群组来源参数
+            $privateLink = "https://t.me/{$botUsername}?start=group_" . abs($chatId);
+            
+            // 构建引导消息
+            $message = "👋 *欢迎使用机器人！*\n\n" .
+                    "🔐 *为了更好的体验，所有功能都需要在私聊中使用*\n\n" .
+                    "✨ *私聊功能包括：*\n" .
+                    "• 🧧 红包功能\n" .
+                    "• 💰 充值提现\n" .
+                    "• 👤 个人中心\n" .
+                    "• 📊 数据查询\n\n" .
+                    "👆 *点击下方按钮开启私聊对话*";
+            
+            // 构建键盘
+            $keyboard = [
+                [
+                    ['text' => '💬 开启私聊', 'url' => $privateLink]
+                ],
+                [
+                    ['text' => '❓ 如何使用', 'callback_data' => 'usage_help']
+                ]
+            ];
+            
+            $this->sendMessageWithKeyboard($chatId, $message, $keyboard, $debugFile);
+            $this->log($debugFile, "✅ 群聊引导消息发送完成");
+            
+        } catch (\Exception $e) {
+            $this->log($debugFile, "❌ 处理群聊/start命令异常: " . $e->getMessage());
+            $this->sendGroupStartFallbackMessage($chatId, $debugFile);
+        }
+    }
+
+    /**
+     * 🆕 获取机器人用户名
+     */
+    private function getBotUsername(string $debugFile): string
+    {
+        try {
+            // 优先从配置文件获取
+            $botUsername = config('telegram.bot_username', '');
+            if (!empty($botUsername)) {
+                $this->log($debugFile, "✅ 从配置获取到机器人用户名: {$botUsername}");
+                return $botUsername;
+            }
+            
+            // 从缓存获取
+            $cacheKey = 'telegram_bot_username';
+            $cachedUsername = cache($cacheKey);
+            if (!empty($cachedUsername)) {
+                $this->log($debugFile, "✅ 从缓存获取到机器人用户名: {$cachedUsername}");
+                return $cachedUsername;
+            }
+            
+            // 通过API获取并缓存
+            $telegramService = new \app\service\TelegramService();
+            $botInfo = $telegramService->getMe();
+            
+            if ($botInfo['code'] === 200 && !empty($botInfo['data']['username'])) {
+                $username = $botInfo['data']['username'];
+                // 缓存1小时
+                cache($cacheKey, $username, 3600);
+                $this->log($debugFile, "✅ 通过API获取并缓存机器人用户名: {$username}");
+                return $username;
+            }
+            
+            $this->log($debugFile, "❌ 无法获取机器人用户名");
+            return '';
+            
+        } catch (\Exception $e) {
+            $this->log($debugFile, "❌ 获取机器人用户名异常: " . $e->getMessage());
+            return '';
+        }
+    }
+
+    /**
+     * 🆕 发送群聊启动备用消息（当无法获取机器人用户名时）
+     */
+    private function sendGroupStartFallbackMessage(int $chatId, string $debugFile): void
+    {
+        try {
+            $message = "👋 *欢迎使用机器人！*\n\n" .
+                    "🔐 *所有功能需要在私聊中使用*\n\n" .
+                    "📱 *如何开启私聊：*\n" .
+                    "1️⃣ 点击机器人头像\n" .
+                    "2️⃣ 选择\"发送消息\"\n" .
+                    "3️⃣ 发送 /start 开始使用\n\n" .
+                    "💡 *或者直接搜索机器人名称，发起私聊*";
+            
+            $keyboard = [
+                [
+                    ['text' => '❓ 使用帮助', 'callback_data' => 'usage_help']
+                ]
+            ];
+            
+            $this->sendMessageWithKeyboard($chatId, $message, $keyboard, $debugFile);
+            $this->log($debugFile, "✅ 群聊备用引导消息发送完成");
+            
+        } catch (\Exception $e) {
+            $this->log($debugFile, "❌ 发送群聊备用消息异常: " . $e->getMessage());
+        }
     }
     
     /**
@@ -434,6 +528,7 @@ class CommandDispatcher extends BaseTelegramController
                     if ($prefix === 'confirm_game_id_' && method_exists($controller, 'handleGameIdConfirmation')) {
                         $controller->handleGameIdConfirmation($callbackData, $chatId, $debugFile);
                     } else {
+                        // 🔥 修复：传递 callbackQueryId 给控制器
                         if (method_exists($controller, 'handleCallback')) {
                             // 检查方法是否接受第四个参数
                             $reflection = new \ReflectionMethod($controller, 'handleCallback');
@@ -453,6 +548,7 @@ class CommandDispatcher extends BaseTelegramController
         $controllerClass = $this->callbackMap[$callbackData] ?? null;
         if ($controllerClass && class_exists($controllerClass)) {
             $this->createAndExecuteController($controllerClass, $user, $chatContext, function($controller) use ($callbackData, $chatId, $debugFile, $callbackQueryId) {
+                // 🔥 修复：传递 callbackQueryId 给控制器
                 if (method_exists($controller, 'handleCallback')) {
                     // 检查方法是否接受第四个参数
                     $reflection = new \ReflectionMethod($controller, 'handleCallback');
