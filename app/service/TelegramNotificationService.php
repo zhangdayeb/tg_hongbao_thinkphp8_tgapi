@@ -206,7 +206,83 @@ class TelegramNotificationService
         return $this->sendToGroup($chatId, $messageType, $templateData, $sourceType, $sourceId);
     }
     
+    /**
+     * 发送消息给单个用户（私聊）
+     */
+    public function sendToUser(int $userId, string $messageType, array $templateData, string $sourceType, int $sourceId = 0): array
+    {
+        try {
+            // 获取消息模板
+            $template = config("notification_templates.{$messageType}");
+            if (!$template) {
+                throw new \Exception("消息模板 {$messageType} 不存在");
+            }
+            
+            // 格式化消息内容
+            $messageContent = $this->formatMessageContent($template, $templateData);
+            
+            // 根据模板类型发送消息到用户私聊
+            $result = match($template['type']) {
+                'photo' => $this->sendPhoto((string)$userId, $messageContent),
+                'animation' => $this->sendAnimation((string)$userId, $messageContent),
+                'text_with_button' => $this->sendTextWithButton((string)$userId, $messageContent),
+                'photo_then_button' => $this->sendPhotoThenButton((string)$userId, $messageContent),
+                default => $this->sendText((string)$userId, $messageContent)
+            };
+            
+            // 记录发送日志（用户私聊）
+            $this->logUserMessage($userId, $messageType, $messageContent, $result, $sourceType, $sourceId);
+            
+            return [
+                'success' => $result['ok'] ?? false,
+                'message' => $result['ok'] ? '发送成功' : ($result['description'] ?? '发送失败'),
+                'telegram_response' => $result
+            ];
+            
+        } catch (\Exception $e) {
+            Log::error("发送消息到用户 {$userId} 失败: " . $e->getMessage());
+            
+            // 记录失败日志
+            $this->logUserMessage($userId, $messageType, '', ['ok' => false, 'description' => $e->getMessage()], $sourceType, $sourceId);
+            
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+                'telegram_response' => null
+            ];
+        }
+    }
     
+    /**
+     * 记录用户私聊消息发送日志
+     */
+    private function logUserMessage(int $userId, string $messageType, mixed $content, array $result, string $sourceType, int $sourceId): void
+    {
+        try {
+            $contentText = '';
+            if (is_array($content)) {
+                $contentText = $content['text'] ?? $content['caption'] ?? json_encode($content);
+            } else {
+                $contentText = (string)$content;
+            }
+            
+            TgMessageLog::create([
+                'message_type' => 'notification',
+                'target_type' => 'user',  // 标记为用户私聊
+                'target_id' => (string)$userId,
+                'content' => $contentText,
+                'send_status' => ($result['ok'] ?? false) ? 1 : 2,
+                'error_message' => $result['ok'] ? null : ($result['description'] ?? '未知错误'),
+                'telegram_message_id' => $result['result']['message_id'] ?? null,
+                'source_id' => $sourceId > 0 ? $sourceId : null,
+                'source_type' => $sourceType,
+                'sent_at' => date('Y-m-d H:i:s')
+            ]);
+        } catch (\Exception $e) {
+            Log::error("记录用户消息日志失败: " . $e->getMessage());
+        }
+    }
+
     /**
      * 格式化消息内容
      */

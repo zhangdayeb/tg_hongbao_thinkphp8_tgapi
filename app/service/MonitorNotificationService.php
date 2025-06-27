@@ -260,6 +260,7 @@ class MonitorNotificationService
             
             // 简化查询条件，分步骤查询避免复杂嵌套
             $pendingAds = Advertisement::where('status', 1) // 只查找启用状态
+                ->where('is_crowd', 1) // 新增：只处理群发广告
                 ->where(function($query) use ($currentDate) {
                     // 检查有效期 - 简化条件
                     $query->where(function($subQuery) use ($currentDate) {
