@@ -117,6 +117,12 @@ class AdvertisementAllMemberBroadcastService
         $currentDate = date('Y-m-d');
         $currentTimeOnly = date('H:i');
         
+        Log::info("查询私发广告条件", [
+            'current_time' => $currentTime,
+            'current_date' => $currentDate,
+            'current_time_only' => $currentTimeOnly
+        ]);
+        
         // 查询启用且is_all_member=1的广告
         $pendingAds = Advertisement::where('status', 1)
             ->where('is_all_member', 1)  // 只处理私发广告
@@ -133,14 +139,26 @@ class AdvertisementAllMemberBroadcastService
             ->order('created_at', 'asc')
             ->select();
         
-        // 手动过滤需要发送的广告
+        Log::info("查询到符合基础条件的广告数量: " . count($pendingAds));
+        
+        // 手动过滤需要发送的广告，避免复杂SQL查询
         $filteredAds = [];
         foreach ($pendingAds as $ad) {
             $shouldSend = false;
             
+            Log::info("检查广告ID {$ad->id} 发送条件", [
+                'send_mode' => $ad->send_mode,
+                'last_member_sent_time' => $ad->last_member_sent_time,
+                'send_time' => $ad->send_time,
+                'daily_times' => $ad->daily_times,
+                'interval_minutes' => $ad->interval_minutes
+            ]);
+            
             // 模式1：一次性定时发送
             if ($ad->send_mode == 1) {
-                if ($ad->is_sent == 0 && $ad->send_time <= $currentTime) {
+                // 私发使用独立的判断：检查是否已经私发过
+                $memberSent = !empty($ad->last_member_sent_time);
+                if (!$memberSent && $ad->send_time <= $currentTime) {
                     $shouldSend = true;
                     Log::info("广告ID {$ad->id} - 模式1：一次性定时私发符合条件");
                 }
@@ -154,19 +172,19 @@ class AdvertisementAllMemberBroadcastService
                         Log::info("广告ID {$ad->id} - 模式2：每日定时私发符合条件");
                     }
                 }
-                // 启动时发送：如果从未发送过或今天未发送过
-                if (empty($ad->last_sent_time) || date('Y-m-d', strtotime($ad->last_sent_time)) < $currentDate) {
+                // 启动时发送：如果从未私发过或今天未私发过
+                if (empty($ad->last_member_sent_time) || date('Y-m-d', strtotime($ad->last_member_sent_time)) < $currentDate) {
                     $shouldSend = true;
                     Log::info("广告ID {$ad->id} - 模式2：启动时首次私发");
                 }
             }
             // 模式3：循环间隔发送
             elseif ($ad->send_mode == 3) {
-                if (empty($ad->last_sent_time)) {
+                if (empty($ad->last_member_sent_time)) {
                     $shouldSend = true;
                     Log::info("广告ID {$ad->id} - 模式3：启动时首次私发");
                 } elseif (!empty($ad->interval_minutes)) {
-                    $lastSentTime = strtotime($ad->last_sent_time);
+                    $lastSentTime = strtotime($ad->last_member_sent_time);
                     $minutesPassed = (time() - $lastSentTime) / 60;
                     if ($minutesPassed >= $ad->interval_minutes) {
                         $shouldSend = true;
@@ -177,9 +195,13 @@ class AdvertisementAllMemberBroadcastService
             
             if ($shouldSend) {
                 $filteredAds[] = $ad;
+                Log::info("广告ID {$ad->id} 加入私发队列");
+            } else {
+                Log::info("广告ID {$ad->id} 不满足私发条件，跳过");
             }
         }
         
+        Log::info("最终确定需要私发的广告数量: " . count($filteredAds));
         return $filteredAds;
     }
     
@@ -189,10 +211,10 @@ class AdvertisementAllMemberBroadcastService
     private function getAllActiveMembers(): array
     {
         try {
-            $members = User::where('status', 1)                    // 正常状态
-                ->where('telegram_id', '>', 0)                         // 有telegram_id
-                ->whereNotNull('telegram_id')                          // telegram_id不为空
-                ->field('id,telegram_id,username,nickname')            // 只查询必要字段
+            $members = User::where('status', 1)                         // 正常状态
+                ->where('tg_id', '>', 0)                         // 有tg_id
+                ->whereNotNull('tg_id')                          // tg_id不为空
+                ->field('id,tg_id,tg_username,user_name')            // 只查询必要字段
                 ->order('id', 'asc')
                 ->select()
                 ->toArray();
@@ -221,7 +243,7 @@ class AdvertisementAllMemberBroadcastService
         ];
         
         $currentTime = date('Y-m-d H:i:s');
-        $isStartupSend = empty($advertisement->last_member_sent_time);  // 改为使用私发时间字段
+        $isStartupSend = empty($advertisement->last_member_sent_time);  // 使用私发时间字段
         
         if ($isStartupSend) {
             Log::info("广告ID {$advertisement->id} - 启动时首次私发");
@@ -242,22 +264,22 @@ class AdvertisementAllMemberBroadcastService
                     
                     if ($sendResult['success']) {
                         $result['success_count']++;
-                        Log::debug("用户 {$member['telegram_id']} 发送成功");
+                        Log::debug("用户 {$member['tg_id']} 发送成功");
                     } else {
                         $result['failed_count']++;
-                        $result['errors'][] = "用户 {$member['telegram_id']}: " . $sendResult['message'];
-                        Log::warning("用户 {$member['telegram_id']} 发送失败: " . $sendResult['message']);
+                        $result['errors'][] = "用户 {$member['tg_id']}: " . $sendResult['message'];
+                        Log::warning("用户 {$member['tg_id']} 发送失败: " . $sendResult['message']);
                     }
                     
                 } catch (\Exception $e) {
                     // 捕获任何异常，确保不影响其他用户
                     $result['total_sent']++;
                     $result['failed_count']++;
-                    $error = "用户 {$member['telegram_id']} 发送异常: " . $e->getMessage();
+                    $error = "用户 {$member['tg_id']} 发送异常: " . $e->getMessage();
                     $result['errors'][] = $error;
                     Log::error($error, [
                         'member_id' => $member['id'] ?? 'unknown',
-                        'telegram_id' => $member['telegram_id'] ?? 'unknown',
+                        'tg_id' => $member['tg_id'] ?? 'unknown',
                         'exception' => $e
                     ]);
                 }
@@ -287,17 +309,17 @@ class AdvertisementAllMemberBroadcastService
         $lastError = '';
         
         // 验证会员数据
-        if (empty($member['telegram_id']) || $member['telegram_id'] <= 0) {
+        if (empty($member['tg_id']) || $member['tg_id'] <= 0) {
             return [
                 'success' => false,
-                'message' => '用户 telegram_id 无效'
+                'message' => '用户 tg_id 无效'
             ];
         }
         
         // 重试机制：发送失败时重试，但不影响其他用户
         for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
             try {
-                $telegramId = (int)$member['telegram_id'];
+                $telegramId = (int)$member['tg_id'];
                 
                 // 准备消息数据
                 $messageData = $advertisement->toArray();
@@ -331,9 +353,9 @@ class AdvertisementAllMemberBroadcastService
                 
             } catch (\Exception $e) {
                 $lastError = $e->getMessage();
-                Log::error("用户 {$member['telegram_id']} 第 {$attempt} 次发送异常", [
+                Log::error("用户 {$member['tg_id']} 第 {$attempt} 次发送异常", [
                     'member_id' => $member['id'] ?? 'unknown',
-                    'telegram_id' => $member['telegram_id'],
+                    'tg_id' => $member['tg_id'],
                     'attempt' => $attempt,
                     'error' => $lastError,
                     'exception' => $e
@@ -352,7 +374,7 @@ class AdvertisementAllMemberBroadcastService
         }
         
         // 所有重试都失败了
-        Log::error("用户 {$member['telegram_id']} 发送最终失败，已重试 {$maxRetries} 次", [
+        Log::error("用户 {$member['tg_id']} 发送最终失败，已重试 {$maxRetries} 次", [
             'final_error' => $lastError
         ]);
         
