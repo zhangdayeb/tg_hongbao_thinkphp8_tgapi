@@ -6,7 +6,7 @@ namespace app\service;
 use app\model\Recharge;
 use app\model\Withdraw;
 use app\model\RedPacket;
-use app\model\Advertisement;
+use app\model\TgAdvertisement as Advertisement;
 use think\facade\Log;
 use think\facade\Cache;
 use think\facade\Db;

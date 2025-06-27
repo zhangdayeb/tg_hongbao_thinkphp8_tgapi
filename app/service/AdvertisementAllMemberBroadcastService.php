@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace app\service;
 
-use app\model\Advertisement;
-use app\model\UserModel;
+use app\model\TgAdvertisement as Advertisement;
+use app\model\User;
 use think\facade\Log;
 
 /**
@@ -189,7 +189,7 @@ class AdvertisementAllMemberBroadcastService
     private function getAllActiveMembers(): array
     {
         try {
-            $members = UserModel::where('status', 1)                    // 正常状态
+            $members = User::where('status', 1)                    // 正常状态
                 ->where('telegram_id', '>', 0)                         // 有telegram_id
                 ->whereNotNull('telegram_id')                          // telegram_id不为空
                 ->field('id,telegram_id,username,nickname')            // 只查询必要字段
@@ -221,7 +221,7 @@ class AdvertisementAllMemberBroadcastService
         ];
         
         $currentTime = date('Y-m-d H:i:s');
-        $isStartupSend = empty($advertisement->last_sent_time);
+        $isStartupSend = empty($advertisement->last_member_sent_time);  // 改为使用私发时间字段
         
         if ($isStartupSend) {
             Log::info("广告ID {$advertisement->id} - 启动时首次私发");
@@ -368,39 +368,42 @@ class AdvertisementAllMemberBroadcastService
     private function updateAdvertisementStatus($advertisement, array $result, string $currentTime): void
     {
         try {
-            // 更新广告统计
+            // 更新广告统计（保持原有逻辑）
             $advertisement->total_sent_count = ($advertisement->total_sent_count ?? 0) + 1;
             $advertisement->success_count = ($advertisement->success_count ?? 0) + $result['success_count'];
             $advertisement->failed_count = ($advertisement->failed_count ?? 0) + $result['failed_count'];
-            $advertisement->last_sent_time = $currentTime;
             
-            // 根据发送模式更新状态
+            // 更新私发专用时间字段
+            $advertisement->last_member_sent_time = $currentTime;
+            
+            // 根据发送模式更新私发状态
             if ($advertisement->send_mode == 1) {
-                // 一次性发送，标记为已发送
-                $advertisement->is_sent = 1;
-                $advertisement->status = 2; // 已完成
+                // 一次性发送，不修改原有的 is_sent 和 status（给群发使用）
+                // 私发的一次性状态通过 last_member_sent_time 来判断
+                Log::info("广告ID {$advertisement->id} - 模式1：私发完成，不重复发送");
             } elseif ($advertisement->send_mode == 2) {
-                // 每日定时，计算下次发送时间
-                $this->calculateNextDailySendTime($advertisement, $currentTime);
+                // 每日定时，计算下次私发时间
+                $this->calculateNextMemberDailySendTime($advertisement, $currentTime);
             } elseif ($advertisement->send_mode == 3) {
-                // 循环间隔，计算下次发送时间
+                // 循环间隔，计算下次私发时间
                 $nextTime = new \DateTime($currentTime);
                 $nextTime->add(new \DateInterval('PT' . $advertisement->interval_minutes . 'M'));
-                $advertisement->next_send_time = $nextTime->format('Y-m-d H:i:s');
+                $advertisement->next_member_send_time = $nextTime->format('Y-m-d H:i:s');
             }
             
             $advertisement->save();
             
-            Log::info("广告状态更新完成", [
+            Log::info("广告私发状态更新完成", [
                 'ad_id' => $advertisement->id,
                 'send_mode' => $advertisement->send_mode,
                 'total_sent_count' => $advertisement->total_sent_count,
                 'success_count' => $advertisement->success_count,
-                'failed_count' => $advertisement->failed_count
+                'failed_count' => $advertisement->failed_count,
+                'last_member_sent_time' => $advertisement->last_member_sent_time
             ]);
             
         } catch (\Exception $e) {
-            Log::error("更新广告状态失败", [
+            Log::error("更新广告私发状态失败", [
                 'ad_id' => $advertisement->id,
                 'error' => $e->getMessage()
             ]);
@@ -408,9 +411,9 @@ class AdvertisementAllMemberBroadcastService
     }
     
     /**
-     * 计算每日定时广告的下次发送时间
+     * 计算每日定时广告的下次私发时间
      */
-    private function calculateNextDailySendTime($advertisement, string $currentTime): void
+    private function calculateNextMemberDailySendTime($advertisement, string $currentTime): void
     {
         if (empty($advertisement->daily_times)) {
             return;
@@ -436,6 +439,6 @@ class AdvertisementAllMemberBroadcastService
             $nextDateTime->add(new \DateInterval('P1D'));
         }
         
-        $advertisement->next_send_time = $nextDateTime->format('Y-m-d H:i:s');
+        $advertisement->next_member_send_time = $nextDateTime->format('Y-m-d H:i:s');
     }
 }
