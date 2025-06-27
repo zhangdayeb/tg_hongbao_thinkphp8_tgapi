@@ -24,7 +24,7 @@ class AdvertisementAllMemberBroadcastService
     }
     
     /**
-     * 处理全体会员广告私发 - 主入口方法
+     * 处理全体会员广告私发 - 主入口方法（支持实时显示）
      */
     public function processBroadcast(): array
     {
@@ -41,33 +41,85 @@ class AdvertisementAllMemberBroadcastService
         ];
         
         try {
+            // 输出开始信息
+            echo "\n🚀 开始全体会员广告私发处理...\n";
+            echo "启动时间: " . date('Y-m-d H:i:s') . "\n";
+            echo str_repeat("=", 60) . "\n";
+            
+            // 强制输出缓冲
+            if (ob_get_level()) {
+                ob_flush();
+            }
+            flush();
+            
             Log::info("开始处理全体会员广告私发");
             
             // 1. 获取待私发的广告
+            echo "🔍 正在查找待私发广告...\n";
+            if (ob_get_level()) {
+                ob_flush();
+            }
+            flush();
+            
             $advertisements = $this->getPendingAdvertisements();
             $result['summary']['ads_processed'] = count($advertisements);
             
             if (empty($advertisements)) {
+                echo "ℹ️  当前没有需要私发的广告\n";
                 Log::info("当前没有需要私发的广告");
                 return $result;
             }
             
+            echo "✅ 发现 " . count($advertisements) . " 条待私发广告\n";
+            if (ob_get_level()) {
+                ob_flush();
+            }
+            flush();
+            
             Log::info("发现 " . count($advertisements) . " 条待私发广告");
             
             // 2. 获取全体活跃会员
+            echo "👥 正在获取活跃会员列表...\n";
+            if (ob_get_level()) {
+                ob_flush();
+            }
+            flush();
+            
             $members = $this->getAllActiveMembers();
             $result['summary']['total_members'] = count($members);
             
             if (empty($members)) {
+                echo "⚠️  没有找到活跃会员，跳过私发\n";
                 Log::warning("没有找到活跃会员，跳过私发");
                 $result['errors'][] = "没有找到活跃会员";
                 return $result;
             }
             
+            echo "✅ 找到 " . count($members) . " 个活跃会员\n";
+            if (ob_get_level()) {
+                ob_flush();
+            }
+            flush();
+            
             Log::info("找到 " . count($members) . " 个活跃会员");
             
             // 3. 逐个处理广告
-            foreach ($advertisements as $ad) {
+            echo "\n📢 开始逐个处理广告...\n";
+            if (ob_get_level()) {
+                ob_flush();
+            }
+            flush();
+            
+            foreach ($advertisements as $adIndex => $ad) {
+                $adNumber = $adIndex + 1;
+                $totalAds = count($advertisements);
+                
+                echo "\n🎯 [{$adNumber}/{$totalAds}] 处理广告ID: {$ad->id}\n";
+                if (ob_get_level()) {
+                    ob_flush();
+                }
+                flush();
+                
                 try {
                     $adResult = $this->processAdvertisement($ad, $members);
                     $result['advertisements'][] = $adResult;
@@ -76,6 +128,12 @@ class AdvertisementAllMemberBroadcastService
                     $result['summary']['total_messages'] += $adResult['total_sent'];
                     $result['summary']['success_count'] += $adResult['success_count'];
                     $result['summary']['failed_count'] += $adResult['failed_count'];
+                    
+                    echo "✅ 广告ID {$ad->id} 处理完成\n";
+                    if (ob_get_level()) {
+                        ob_flush();
+                    }
+                    flush();
                     
                     Log::info("广告ID {$ad->id} 处理完成", [
                         'total_sent' => $adResult['total_sent'],
@@ -86,21 +144,52 @@ class AdvertisementAllMemberBroadcastService
                 } catch (\Exception $e) {
                     $error = "广告ID {$ad->id} 处理失败: " . $e->getMessage();
                     $result['errors'][] = $error;
+                    echo "❌ {$error}\n";
+                    if (ob_get_level()) {
+                        ob_flush();
+                    }
+                    flush();
                     Log::error($error, ['exception' => $e]);
                 }
             }
+            
+            // 输出最终汇总
+            $overallSuccessRate = $result['summary']['total_messages'] > 0 ? 
+                round(($result['summary']['success_count'] / $result['summary']['total_messages']) * 100, 2) : 0;
+                
+            echo "\n" . str_repeat("=", 60) . "\n";
+            echo "🏁 全体会员广告私发处理完成!\n";
+            echo "📊 总体统计:\n";
+            echo "   处理广告数: {$result['summary']['ads_processed']}\n";
+            echo "   目标会员数: {$result['summary']['total_members']}\n";
+            echo "   总发送消息: {$result['summary']['total_messages']}\n";
+            echo "   发送成功: {$result['summary']['success_count']}\n";
+            echo "   发送失败: {$result['summary']['failed_count']}\n";
+            echo "   总体成功率: {$overallSuccessRate}%\n";
+            echo "   完成时间: " . date('Y-m-d H:i:s') . "\n";
+            echo str_repeat("=", 60) . "\n";
+            
+            // 强制输出缓冲
+            if (ob_get_level()) {
+                ob_flush();
+            }
+            flush();
             
             Log::info("全体会员广告私发处理完成", [
                 'total_ads' => $result['summary']['ads_processed'],
                 'total_members' => $result['summary']['total_members'],
                 'total_messages' => $result['summary']['total_messages'],
-                'success_rate' => $result['summary']['total_messages'] > 0 ? 
-                    round(($result['summary']['success_count'] / $result['summary']['total_messages']) * 100, 2) : 0
+                'success_rate' => $overallSuccessRate
             ]);
             
         } catch (\Exception $e) {
             $error = "全体会员广告私发处理异常: " . $e->getMessage();
             $result['errors'][] = $error;
+            echo "💥 处理异常: {$error}\n";
+            if (ob_get_level()) {
+                ob_flush();
+            }
+            flush();
             Log::error($error, ['exception' => $e]);
             throw $e;
         }
@@ -229,7 +318,7 @@ class AdvertisementAllMemberBroadcastService
     }
     
     /**
-     * 处理单个广告的私发
+     * 处理单个广告的私发 - 支持实时显示发送结果
      */
     private function processAdvertisement($advertisement, array $members): array
     {
@@ -243,20 +332,53 @@ class AdvertisementAllMemberBroadcastService
         ];
         
         $currentTime = date('Y-m-d H:i:s');
-        $isStartupSend = empty($advertisement->last_member_sent_time);  // 使用私发时间字段
+        $isStartupSend = empty($advertisement->last_member_sent_time);
         
         if ($isStartupSend) {
             Log::info("广告ID {$advertisement->id} - 启动时首次私发");
         }
         
+        // 输出开始信息
+        echo "\n=== 开始处理广告ID: {$advertisement->id} ===\n";
+        echo "广告标题: {$advertisement->title}\n";
+        echo "目标用户数: " . count($members) . "\n";
+        echo "开始时间: {$currentTime}\n";
+        echo str_repeat("-", 50) . "\n";
+        
+        // 强制输出缓冲
+        if (ob_get_level()) {
+            ob_flush();
+        }
+        flush();
+        
         // 分批处理会员，避免内存问题
         $memberBatches = array_chunk($members, $this->batchSize);
+        $totalBatches = count($memberBatches);
         
         foreach ($memberBatches as $batchIndex => $batch) {
-            Log::info("处理第 " . ($batchIndex + 1) . " 批会员，共 " . count($batch) . " 个");
+            $batchNumber = $batchIndex + 1;
+            echo "\n📦 处理第 {$batchNumber}/{$totalBatches} 批，本批用户数: " . count($batch) . "\n";
             
-            foreach ($batch as $member) {
+            // 强制输出缓冲
+            if (ob_get_level()) {
+                ob_flush();
+            }
+            flush();
+            
+            foreach ($batch as $memberIndex => $member) {
+                $memberNumber = ($batchIndex * $this->batchSize) + $memberIndex + 1;
+                $totalMembers = count($members);
+                
                 try {
+                    // 显示当前发送状态
+                    echo "[{$memberNumber}/{$totalMembers}] 发送给用户 {$member['tg_id']} ";
+                    
+                    // 强制输出缓冲，让用户看到正在发送
+                    if (ob_get_level()) {
+                        ob_flush();
+                    }
+                    flush();
+                    
                     // 发送私聊消息
                     $sendResult = $this->sendToMember($member, $advertisement);
                     
@@ -264,11 +386,19 @@ class AdvertisementAllMemberBroadcastService
                     
                     if ($sendResult['success']) {
                         $result['success_count']++;
+                        echo "✅ 成功\n";
                         Log::debug("用户 {$member['tg_id']} 发送成功");
                     } else {
                         $result['failed_count']++;
                         $result['errors'][] = "用户 {$member['tg_id']}: " . $sendResult['message'];
+                        echo "❌ 失败: " . $sendResult['message'] . "\n";
                         Log::warning("用户 {$member['tg_id']} 发送失败: " . $sendResult['message']);
+                    }
+                    
+                    // 显示当前统计
+                    if ($memberNumber % 10 == 0 || $memberNumber == $totalMembers) {
+                        $successRate = $result['total_sent'] > 0 ? round(($result['success_count'] / $result['total_sent']) * 100, 1) : 0;
+                        echo "📊 当前进度: {$result['success_count']} 成功, {$result['failed_count']} 失败, 成功率: {$successRate}%\n";
                     }
                     
                 } catch (\Exception $e) {
@@ -277,12 +407,20 @@ class AdvertisementAllMemberBroadcastService
                     $result['failed_count']++;
                     $error = "用户 {$member['tg_id']} 发送异常: " . $e->getMessage();
                     $result['errors'][] = $error;
+                    echo "💥 异常: " . $e->getMessage() . "\n";
+                    
                     Log::error($error, [
                         'member_id' => $member['id'] ?? 'unknown',
                         'tg_id' => $member['tg_id'] ?? 'unknown',
                         'exception' => $e
                     ]);
                 }
+                
+                // 强制输出缓冲，确保实时显示
+                if (ob_get_level()) {
+                    ob_flush();
+                }
+                flush();
                 
                 // 无论成功失败都要控制发送频率，防止触发限制
                 try {
@@ -292,7 +430,32 @@ class AdvertisementAllMemberBroadcastService
                     Log::warning("sleep 调用异常: " . $e->getMessage());
                 }
             }
+            
+            // 批次完成提示
+            echo "✅ 第 {$batchNumber} 批处理完成\n";
+            if (ob_get_level()) {
+                ob_flush();
+            }
+            flush();
         }
+        
+        // 输出最终统计
+        $finalSuccessRate = $result['total_sent'] > 0 ? round(($result['success_count'] / $result['total_sent']) * 100, 2) : 0;
+        echo "\n" . str_repeat("=", 50) . "\n";
+        echo "🎯 广告ID {$advertisement->id} 发送完成!\n";
+        echo "📈 最终统计:\n";
+        echo "   总发送: {$result['total_sent']}\n";
+        echo "   成功: {$result['success_count']}\n"; 
+        echo "   失败: {$result['failed_count']}\n";
+        echo "   成功率: {$finalSuccessRate}%\n";
+        echo "   完成时间: " . date('Y-m-d H:i:s') . "\n";
+        echo str_repeat("=", 50) . "\n";
+        
+        // 强制输出缓冲
+        if (ob_get_level()) {
+            ob_flush();
+        }
+        flush();
         
         // 更新广告统计和状态
         $this->updateAdvertisementStatus($advertisement, $result, $currentTime);
@@ -301,13 +464,10 @@ class AdvertisementAllMemberBroadcastService
     }
     
     /**
-     * 发送消息给单个会员
+     * 发送消息给单个会员 - 无重试版本，直接返回结果
      */
     private function sendToMember(array $member, $advertisement): array
     {
-        $maxRetries = $this->maxRetries;
-        $lastError = '';
-        
         // 验证会员数据
         if (empty($member['tg_id']) || $member['tg_id'] <= 0) {
             return [
@@ -316,72 +476,71 @@ class AdvertisementAllMemberBroadcastService
             ];
         }
         
-        // 重试机制：发送失败时重试，但不影响其他用户
-        for ($attempt = 1; $attempt <= $maxRetries; $attempt++) {
-            try {
-                $telegramId = (int)$member['tg_id'];
+        try {
+            $telegramId = (int)$member['tg_id'];
+            
+            // 准备消息数据
+            $messageData = $advertisement->toArray();
+            $messageData['member_info'] = $member;
+            
+            // 发送私聊消息 - 只尝试一次
+            $result = $this->telegramService->sendToUser(
+                $telegramId,
+                'advertisement_notify',
+                $messageData,
+                'advertisement_allmember',
+                $advertisement->id
+            );
+            
+            // 发送成功
+            if ($result['success'] ?? false) {
+                return [
+                    'success' => true,
+                    'message' => '发送成功'
+                ];
+            } else {
+                // 发送失败，直接返回失败原因
+                $errorMessage = $result['message'] ?? '发送失败';
                 
-                // 准备消息数据
-                $messageData = $advertisement->toArray();
-                $messageData['member_info'] = $member;
-                
-                // 发送私聊消息
-                $result = $this->telegramService->sendToUser(
-                    $telegramId,
-                    'advertisement_notify',
-                    $messageData,
-                    'advertisement_allmember',
-                    $advertisement->id
-                );
-                
-                // 发送成功，立即返回
-                if ($result['success'] ?? false) {
-                    if ($attempt > 1) {
-                        Log::info("用户 {$telegramId} 重试第 {$attempt} 次发送成功");
-                    }
-                    return [
-                        'success' => true,
-                        'message' => '发送成功'
-                    ];
-                } else {
-                    $lastError = $result['message'] ?? '发送失败';
-                    if ($attempt < $maxRetries) {
-                        Log::warning("用户 {$telegramId} 第 {$attempt} 次发送失败，准备重试: {$lastError}");
-                        sleep(1); // 重试前短暂延迟
-                    }
+                // 针对常见错误给出简化说明
+                if (strpos($errorMessage, '403') !== false || strpos($errorMessage, 'Forbidden') !== false) {
+                    $errorMessage = '用户已拒收';
+                } elseif (strpos($errorMessage, '400') !== false || strpos($errorMessage, 'Bad Request') !== false) {
+                    $errorMessage = '请求错误';
+                } elseif (strpos($errorMessage, 'blocked') !== false) {
+                    $errorMessage = '用户已屏蔽';
+                } elseif (strpos($errorMessage, 'not found') !== false) {
+                    $errorMessage = '用户不存在';
                 }
                 
-            } catch (\Exception $e) {
-                $lastError = $e->getMessage();
-                Log::error("用户 {$member['tg_id']} 第 {$attempt} 次发送异常", [
-                    'member_id' => $member['id'] ?? 'unknown',
-                    'tg_id' => $member['tg_id'],
-                    'attempt' => $attempt,
-                    'error' => $lastError,
-                    'exception' => $e
-                ]);
-                
-                // 如果还有重试机会，短暂延迟后继续
-                if ($attempt < $maxRetries) {
-                    try {
-                        sleep(1);
-                    } catch (\Exception $sleepError) {
-                        // sleep 异常也不影响重试
-                        Log::warning("sleep 异常: " . $sleepError->getMessage());
-                    }
-                }
+                return [
+                    'success' => false,
+                    'message' => $errorMessage
+                ];
             }
+            
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            
+            // 简化异常消息
+            if (strpos($errorMessage, 'cURL') !== false) {
+                $errorMessage = '网络连接失败';
+            } elseif (strpos($errorMessage, 'timeout') !== false) {
+                $errorMessage = '请求超时';
+            }
+            
+            Log::error("用户 {$member['tg_id']} 发送异常", [
+                'member_id' => $member['id'] ?? 'unknown',
+                'tg_id' => $member['tg_id'],
+                'error' => $errorMessage,
+                'exception' => $e
+            ]);
+            
+            return [
+                'success' => false,
+                'message' => $errorMessage
+            ];
         }
-        
-        // 所有重试都失败了
-        Log::error("用户 {$member['tg_id']} 发送最终失败，已重试 {$maxRetries} 次", [
-            'final_error' => $lastError
-        ]);
-        
-        return [
-            'success' => false,
-            'message' => "重试 {$maxRetries} 次后仍然失败: {$lastError}"
-        ];
     }
     
     /**
