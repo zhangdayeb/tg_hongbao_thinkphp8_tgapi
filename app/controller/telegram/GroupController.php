@@ -26,15 +26,16 @@ class GroupController extends BaseTelegramController
     public function setUser(User $user): void
     {
         $this->user = $user;
-        $this->currentTgId = $user->tg_id ?? null;
+        $this->currentTgId = (int) ($user->tg_id ?? null);
     }
     
     /**
      * 设置当前Telegram用户ID（即使用户未注册也能获取）
      */
-    public function setTgId(int $tgId): void
+    public function setTgId($tgId): void
     {
-        $this->currentTgId = $tgId;
+        // 确保转换为整数类型
+        $this->currentTgId = is_numeric($tgId) ? (int)$tgId : null;
     }
     
     /**

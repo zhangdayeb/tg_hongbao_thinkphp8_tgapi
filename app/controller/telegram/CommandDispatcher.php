@@ -173,7 +173,7 @@ class CommandDispatcher extends BaseTelegramController
             
             // 🔥 新增：无论用户是否注册，都传递Telegram ID
             if ($tgId) {
-                $groupController->setTgId($tgId);
+                $groupController->setTgId((int)$tgId);  // 强制转换
                 $this->log($debugFile, "✅ Telegram用户ID已传递给GroupController - TgID: {$tgId}");
             }
             
