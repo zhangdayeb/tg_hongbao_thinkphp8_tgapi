@@ -146,7 +146,6 @@ class CommandDispatcher extends BaseTelegramController
         }
     }
 
-
     /**
      * 🆕 处理群聊 /start 命令 - 修复：传递用户信息
      */
@@ -155,15 +154,12 @@ class CommandDispatcher extends BaseTelegramController
         try {
             $this->log($debugFile, "🚀 调度群聊/start命令到GroupController - ChatID: {$chatId}");
             
-            // 🔥 修改：获取Telegram用户ID
-            $tgId = $update['message']['from']['id'] ?? null;
-            
-            // 先获取用户信息（可能不存在）
+            // 🔥 修复：先获取用户信息
             $user = $this->ensureUserExists($update, $debugFile);
             
             $groupController = new GroupController();
             
-            // 传递用户信息（如果存在）
+            // 🔥 修复：传递用户信息给GroupController
             if ($user) {
                 $groupController->setUser($user);
                 $this->log($debugFile, "✅ 用户信息已传递给GroupController - UserID: {$user->id}");
@@ -171,19 +167,13 @@ class CommandDispatcher extends BaseTelegramController
                 $this->log($debugFile, "⚠️ 未能获取用户信息，继续使用GroupController无用户模式");
             }
             
-            // 🔥 新增：无论用户是否注册，都传递Telegram ID
-            if ($tgId) {
-                $groupController->setTgId($tgId);
-                $this->log($debugFile, "✅ Telegram用户ID已传递给GroupController - TgID: {$tgId}");
-            }
-            
-            // 调用GroupController（2个参数）
             $groupController->handleStartCommand($chatId, $debugFile);
             
             $this->log($debugFile, "✅ 群聊/start命令处理完成");
             
         } catch (\Exception $e) {
             $this->log($debugFile, "❌ 调度群聊/start命令异常: " . $e->getMessage());
+            // 如果GroupController失败，发送简单消息
             $this->sendMessage($chatId, "❌ 服务暂时不可用，请稍后重试", $debugFile);
         }
     }

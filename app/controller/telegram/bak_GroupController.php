@@ -14,8 +14,6 @@ use think\facade\Db;
 class GroupController extends BaseTelegramController
 {
     protected ?User $user = null;
-    protected ?int $currentChatId = null; // 存储当前群聊ID
-    protected ?int $currentTgId = null;   // 存储当前Telegram用户ID
     
     // 数据库配置缓存
     private static ?array $dbConfig = null;
@@ -26,15 +24,6 @@ class GroupController extends BaseTelegramController
     public function setUser(User $user): void
     {
         $this->user = $user;
-        $this->currentTgId = $user->tg_id ?? null;
-    }
-    
-    /**
-     * 设置当前Telegram用户ID（即使用户未注册也能获取）
-     */
-    public function setTgId(int $tgId): void
-    {
-        $this->currentTgId = $tgId;
     }
     
     /**
@@ -43,8 +32,7 @@ class GroupController extends BaseTelegramController
     public function handleStartCommand(int $chatId, string $debugFile): void
     {
         try {
-            $this->currentChatId = $chatId; // 存储群聊ID
-            $this->log($debugFile, "🚀 GroupController 处理群聊/start命令 - ChatID: {$chatId}, TgID: " . ($this->currentTgId ?? '未知'));
+            $this->log($debugFile, "🚀 GroupController 处理群聊/start命令 - ChatID: {$chatId}");
             
             // 获取机器人用户名（从配置或缓存获取）
             $botUsername = $this->getBotUsername($debugFile);
@@ -260,7 +248,7 @@ class GroupController extends BaseTelegramController
     }
     
     /**
-     * 处理文本配置替换 - 修改：使用 tg_id 和 crowd_id
+     * 处理文本配置替换
      */
     private function processTextConfig(string $text): string
     {
@@ -278,30 +266,20 @@ class GroupController extends BaseTelegramController
         $text = str_replace('[button5_name]', $config['button5_name'] ?? '', $text);
         $text = str_replace('[button6_name]', $config['button6_name'] ?? '', $text);
         
-        // 🔥 修改：处理button1_url，使用 tg_id 和 crowd_id
-        $button1Url = $config['button1_url'] ?? '';
-        if (!empty($button1Url)) {
-            $urlParams = [];
-            
-            // 添加群ID参数
-            if ($this->currentChatId) {
-                $urlParams[] = 'crowd_id=' . $this->currentChatId;
-            }
-            
-            // 添加Telegram用户ID参数
-            if ($this->currentTgId) {
-                $urlParams[] = 'tg_id=' . $this->currentTgId;
-            }
-            
-            if (!empty($urlParams)) {
-                $separator = strpos($button1Url, '?') !== false ? '&' : '?';
-                $button1UrlWithParams = $button1Url . $separator . implode('&', $urlParams);
-                $text = str_replace('[button1_url]', $button1UrlWithParams, $text);
+        // 🔥 修复：正确处理button1_url，需要添加用户ID
+        if ($this->user && isset($this->user->id)) {
+            $button1Url = $config['button1_url'] ?? '';
+            if (!empty($button1Url)) {
+                // 确保URL以/结尾，然后添加login?user_id=
+                $button1Url = rtrim($button1Url, '/') . '/';
+                $button1UrlWithUserId = $button1Url . 'login?user_id=' . $this->user->id;
+                $text = str_replace('[button1_url]', $button1UrlWithUserId, $text);
             } else {
-                $text = str_replace('[button1_url]', $button1Url, $text);
+                $text = str_replace('[button1_url]', '', $text);
             }
         } else {
-            $text = str_replace('[button1_url]', '', $text);
+            // 无用户信息时，使用原URL
+            $text = str_replace('[button1_url]', $config['button1_url'] ?? '', $text);
         }
         
         // 处理其他URL占位符
@@ -318,7 +296,7 @@ class GroupController extends BaseTelegramController
     }
 
     /**
-     * 构建键盘 - 修改：使用 tg_id 和 crowd_id
+     * 构建键盘 - 修复：改进用户信息处理
      */
     private function buildKeyboard(string $privateLink): array
     {
@@ -350,26 +328,11 @@ class GroupController extends BaseTelegramController
             }
             
             if (!$shouldExclude) {
-                // 🔥 修改：button1使用 tg_id 和 crowd_id 参数
-                if ($i === 1) {
-                    $urlParams = [];
-                    
-                    // 添加群ID参数
-                    if ($this->currentChatId) {
-                        $urlParams[] = 'crowd_id=' . $this->currentChatId;
-                    }
-                    
-                    // 添加Telegram用户ID参数
-                    if ($this->currentTgId) {
-                        $urlParams[] = 'tg_id=' . $this->currentTgId;
-                    }
-                    
-                    if (!empty($urlParams)) {
-                        $separator = strpos($buttonUrl, '?') !== false ? '&' : '?';
-                        $processedUrl = $buttonUrl . $separator . implode('&', $urlParams);
-                    } else {
-                        $processedUrl = $buttonUrl;
-                    }
+                // 🔥 修复：改进URL处理，特别是button1需要用户ID
+                if ($i === 1 && $this->user && isset($this->user->id)) {
+                    // button1需要用户ID参数
+                    $separator = strpos($buttonUrl, '?') !== false ? '&' : '?';
+                    $processedUrl = $buttonUrl . $separator . 'user_id=' . $this->user->id;
                 } else {
                     // 其他按钮使用原URL（可能包含其他占位符）
                     $processedUrl = $this->processTextConfig($buttonUrl);
@@ -383,19 +346,26 @@ class GroupController extends BaseTelegramController
         }
         
         // 🔥 添加调试日志
-        $this->log('debug.log', "GroupController 当前信息:");
-        $this->log('debug.log', "  - 群ID (crowd_id): " . ($this->currentChatId ?? '未设置'));
-        $this->log('debug.log', "  - TG用户ID (tg_id): " . ($this->currentTgId ?? '未设置'));
-        $this->log('debug.log', "  - 注册用户ID: " . ($this->user->id ?? '未注册'));
-        $this->log('debug.log', "  - 有效按钮数量: " . count($validButtons));
+        if ($this->user) {
+            $this->log('debug.log', "GroupController 有用户信息 - UserID: {$this->user->id}");
+        } else {
+            $this->log('debug.log', "GroupController 无用户信息");
+        }
+        $this->log('debug.log', "有效按钮数量: " . count($validButtons));
         
         // 第一行：button1（如果存在）
         if (isset($validButtons[1])) {
             $keyboard[] = [
                 ['text' => $validButtons[1]['name'], 'url' => $validButtons[1]['url']]
             ];
-            $this->log('debug.log', "Button1 URL: " . $validButtons[1]['url']);
         }
+        
+        // // 第二行：button2（如果存在）
+        // if (isset($validButtons[2])) {
+        //     $keyboard[] = [
+        //         ['text' => $validButtons[2]['name'], 'url' => $validButtons[2]['url']]
+        //     ];
+        // }
         
         // 第三行：开启机器人按钮（必须存在）
         $keyboard[] = [
